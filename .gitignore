@@ -5,3 +5,9 @@
 *.fdb_latexmk
 *.fls
 *.gz
+
+# editor files
+.idea
+.vscode
+.windsurf
+.cursor
