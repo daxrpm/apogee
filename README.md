@@ -1,118 +1,211 @@
 # Apogee
 
-**Apogee** is a flight dynamics and orbital mechanics simulator for a multi-stage rocket, featuring explicit numerical integration (handwritten RK4), an atmosphere model, discrete events (stage separation), and solar-panel pointing efficiency computed via vector algebra.
+**Apogee** is a high-fidelity rocket ascent + orbit validation platform for a two-stage vehicle reaching a circular low Earth orbit (LEO), with explicit event handling (pitch-over, staging, cutoff), variable-mass dynamics, non-constant gravity, USSA76 atmosphere, and aerodynamic drag.
 
-> Focus: **physics clarity + reproducible numerical methods**, avoiding “black-box” integrators for the core dynamics loop.
+> Focus: **physics correctness + reproducible numerical methods** (adaptive Runge–Kutta + root-finding shooting), with strict separation between core physics and API/UI adapters.
 
 ---
 
 ## Overview
 
-The simulation models a complete mission envelope:
+The reference launch model is a planar (2D) Earth-centered polar ascent in the equatorial plane.
 
-1. **Launch & atmospheric ascent** with thrust, altitude-varying gravity, and aerodynamic drag.
-2. **Transition to exo-atmospheric flight** and **Earth-centered orbital dynamics**.
-3. **Simplified attitude control** and **solar efficiency** from incidence angle (includes yaw steering).
+Fixed design constraints (by requirement):
 
-Reference images (see `resources/`):
+1. **No Earth rotation** (inertial Earth is non-rotating).
+2. **Equatorial launch geometry** (inclination $0^\circ$ in this simplified planar model).
+3. **Three guidance phases**:
+   - vertical ascent
+   - pitch-over kick
+   - gravity turn with thrust aligned to velocity ($\alpha=0$)
 
-![Trajectory overview](resources/general_earth_orbit.png)  
-![Pointing geometry and angles](resources/general_earth_orbit2.png)
+![Two-stage launch concept](docs/2_stages_rocket_launch.png)
+
+Reference figures (from `docs/`):
+
+![General orbit geometry](docs/general_earth_orbit.png)
+
+![General orbit geometry (variant)](docs/general_earth_orbit2.png)
+
+### Reference vehicle context (Falcon 9)
+
+![Falcon 9 rocket](docs/falcon9Rocket.jpg)
+
+![Falcon 9 trajectory](docs/falcon9Trajectory.jpg)
 
 ---
 
 ## Technical goals
 
-- Deterministic physics engine with **continuous state** + **discrete events** (multi-staging).
-- “From scratch” implementation of **Runge–Kutta 4 (RK4)**.
-- Atmosphere based on ISA-like approximations and/or tabulated data + interpolation.
-- Structured telemetry output (CSV/JSON) for analysis and visualization.
-- Modern stack: **FastAPI** (backend) + **React** (frontend) + **Docker** (reproducibility).
+- Deterministic physics engine with **continuous state** + **discrete events** (pitch-over, burnout, separation, cutoff).
+- Adaptive Runge–Kutta integration + event detection (no fixed-step hacks).
+- Atmosphere via **U.S. Standard Atmosphere 1976 (USSA76)**.
+- Structured telemetry output (JSON) for downstream UI/visualization.
+- Clean architecture monorepo:
+  - pure math in core packages
+  - FastAPI as a thin adapter
+  - WebGL frontend consuming JSON
 
 ---
 
 ## Architecture (high level)
 
-- **Backend (Python / FastAPI)**
-  - Runs simulations and exposes telemetry/parameters via API.
-  - Centralizes the physics engine, input validation, and export/persistence.
+- **Core packages (`packages/`)**
+  - `apogee-core`: ascent ODEs, events, variable-mass dynamics (pure math)
+  - `apogee-orbit`: orbital mechanics diagnostics (energy, $a,e,r_{apo},r_{peri}$)
+  - `apogee-atmos`: USSA76 wrapper (`rho(h)`, `a_s(h)`)
+  - `apogee-guidance`: guidance laws (angles only)
 
-- **Frontend (React)**
-  - UI to configure vehicle/stages/profiles and run simulations.
-  - Plots: altitude vs time, velocity, dynamic pressure, etc.
+- **API service (`services/apogee-api/`)**
+  - FastAPI input validation + calling packages + JSON serialization
 
-- **Infra (Docker / Docker Compose)**
-  - Standardizes the runtime environment (dependencies, versions, execution).
+- **Frontend (`frontend/apogee-ui/`)**
+  - JSON consumer + interpolation + visualization (Three.js/WebGL)
 
 ---
 
-## Physics model
+## Launch math (implementation reference)
 
-We integrate translational dynamics (2D or 3D) with a typical state vector:
-- State: $\mathbf{y}(t) = [\mathbf{r}(t),\ \mathbf{v}(t),\ m(t)]^\top$
-- Kinematics: $\dot{\mathbf{r}} = \mathbf{v}$
+This section mirrors the definitions in `docs/nm_final_project.tex` and is the authoritative reference for the ascent model.
 
-Acceleration comes from external forces on a variable-mass vehicle:
-- Dynamics: $\dot{\mathbf{v}} = (\mathbf{T} + \mathbf{F}_g + \mathbf{F}_d) / m$
+### Mission input
 
-### Gravity (not constant)
+Single mission input is the target circular orbit altitude $h_{\text{target}}$ (MSL):
 
-Universal gravitation:
-- Force: $\mathbf{F}_g = -G M_\oplus m\ \mathbf{r} / \|\mathbf{r}\|^3$
-- Acceleration: $\mathbf{a}_g = -\mu\ \mathbf{r} / \|\mathbf{r}\|^3,\ \mu = G M_\oplus$
+$$r_{\text{target}} = R_E + h_{\text{target}}$$
 
-### Thrust (active stage)
+### Earth constants
 
-Generic thrust model:
-- $\mathbf{T}(t) = T(t)\ \hat{\mathbf{u}}(t)$
+- $R_E = 6\,371\,000\ \mathrm{m}$
+- $\mu = 3.986004418\times 10^{14}\ \mathrm{m^3/s^2}$
+- $g_0 = 9.80665\ \mathrm{m/s^2}$
+
+Non-constant gravity:
+
+$$g(r)=\frac{\mu}{r^2}$$
+
+Circular speed at radius $r$:
+
+$$v_{\text{circ}}(r)=\sqrt{\frac{\mu}{r}}$$
+
+### State, coordinates, and kinematics
+
+Planar Earth-centered polar geometry (equatorial plane):
+
+- $r(t)$: geocentric radius
+- $h(t)=r(t)-R_E$: altitude
+- $\lambda(t)$: downrange central angle (rad)
+- $x(t)=R_E\lambda(t)$: surface arc-length downrange (m)
+- $v(t)$: speed magnitude
+- $\gamma(t)$: flight-path angle measured from local horizontal (rad)
+
+State vector:
+
+$$\mathbf{y}(t)=\begin{bmatrix} r \\ \lambda \\ v \\ \gamma \\ m \end{bmatrix}$$
+
+Kinematics:
+
+$$\dot r=v\sin\gamma$$
+
+$$\dot\lambda=\frac{v\cos\gamma}{r}$$
+
+### Atmosphere + drag
+
+USSA76 provides density $\rho(h)$ and (optionally) speed of sound $a_s(h)$.
+
+Mach number:
+
+$$M=\frac{v}{a_s(h)}$$
+
+Drag magnitude:
+
+$$D=\frac{1}{2}\,\rho(h)\,C_D(M)\,A_{\text{ref}}\,v^2$$
+
+![Rocket forces](docs/rocketForces.gif)
+
+### Thrust direction and variable mass
+
+Angle of attack $\alpha$ is defined between thrust direction and velocity direction.
 
 Mass flow during burn:
-- $\dot{m}(t) = -\dot{m}_{prop}(t)$
-- For a stage with $I_{sp}$: $\dot{m}_{prop} \approx T / (I_{sp}\ g_0)$
 
-### Aerodynamic drag
+$$\dot m=-\frac{T}{I_{sp}g_0}$$
 
-Drag force:
-- $\mathbf{F}_d = -\tfrac{1}{2}\rho(h)\ C_d\ A\ \|\mathbf{v}_{rel}\|\ \mathbf{v}_{rel}$
+![Variable mass](docs/variableMass.png)
 
-Where $\mathbf{v}_{rel}$ is the velocity relative to the atmosphere (often simplified to $\mathbf{v}$ if winds/rotation are neglected).
+### Final ODE system
 
-Dynamic pressure (telemetry):
-- $q = \tfrac{1}{2}\rho(h)\ \|\mathbf{v}_{rel}\|^2$
+With thrust magnitude $T$ and drag magnitude $D$:
 
-### Atmosphere (ISA-like approximation)
+$$\dot r = v\sin\gamma$$
 
-Simple exponential density:
-- $\rho(h) = \rho_0\ e^{-h/H}$
+$$\dot\lambda = \frac{v\cos\gamma}{r}$$
 
-Optionally, use **tabulated ISA data + interpolation** (e.g., spline) for $\rho(h)$, $T(h)$, $p(h)$ over altitude bands.
+$$\dot v = \frac{T}{m}\cos\alpha-\frac{D}{m}-\frac{\mu}{r^2}\sin\gamma$$
+
+$$\dot\gamma = \frac{T}{mv}\sin\alpha+\left(\frac{v}{r}-\frac{\mu}{r^2v}\right)\cos\gamma$$
+
+$$\dot m = -\frac{T}{I_{sp}g_0}$$
+
+Gravity turn guidance enforces thrust aligned to velocity:
+
+$$\alpha=0$$
+
+### Hybrid events (explicit)
+
+**Vertical ascent termination** (hold $\gamma=\pi/2$) until:
+
+$$g_{po}(\mathbf{y})=(r-R_E)-h_{po}=0$$
+
+**Pitch-over kick** (instantaneous reset):
+
+$$\gamma(t_{po}^+)=\frac{\pi}{2}-\theta_0$$
+
+**Stage 1 burnout** (event):
+
+$$g_{\text{S1}}(\mathbf{y})=m-m_{1,\text{end}}=0$$
+
+**Stage separation** (mass reset):
+
+$$m^+=m^- - m_{1,\text{dry}}$$
+
+**Final cutoff (SECO/MECO)** (choose $m_{\text{cut}}$ and set $T\leftarrow 0$) when:
+
+$$g_{\text{cut}}(\mathbf{y})=m-m_{\text{cut}}=0$$
 
 ---
 
-## Multi-staging & discrete events
+## Orbit validation (two-body)
 
-A vehicle is defined by stages with:
-- dry mass, propellant mass
-- thrust (constant or profile), $I_{sp}$
-- aerodynamic parameters ($C_d$, reference area $A$)
-- burn time and/or depletion condition
+At cutoff, compute specific mechanical energy and specific angular momentum:
 
-**Stage separation** is a discrete event: instantaneous mass drop (and parameter changes). To locate events with sub-$\Delta t$ accuracy, the simulator can apply:
-- **bisection** or **Newton–Raphson** over an event function $f(t)$ (e.g., remaining propellant mass).
+$$\varepsilon=\frac{v^2}{2}-\frac{\mu}{r}$$
+
+$$h_{\text{ang}}=rv\cos\gamma$$
+
+Then:
+
+$$e=\sqrt{1+\frac{2\varepsilon h_{\text{ang}}^2}{\mu^2}}$$
+
+$$a=-\frac{\mu}{2\varepsilon}$$
+
+$$r_{\text{apo}}=a(1+e),\qquad r_{\text{peri}}=a(1-e)$$
 
 ---
 
-## Numerical integration (handwritten RK4)
+## Numerical methodology (shooting)
 
-We solve $\dot{\mathbf{y}}=\mathbf{f}(t,\mathbf{y})$ with step $\Delta t$:
+Per mission, solve for the decision variables:
 
-- $k_1 = f(t, y)$  
-- $k_2 = f(t+\Delta t/2,\ y+\Delta t\ k_1/2)$  
-- $k_3 = f(t+\Delta t/2,\ y+\Delta t\ k_2/2)$  
-- $k_4 = f(t+\Delta t,\ y+\Delta t\ k_3)$  
-- $y_{n+1} = y_n + (\Delta t/6)\ (k_1 + 2k_2 + 2k_3 + k_4)$
+$$\mathbf{u}=\begin{bmatrix}\theta_0\\m_{\text{cut}}\end{bmatrix}$$
 
-> By design, Apogee avoids `scipy.integrate` for the core integration loop (the goal is explicit, inspectable numerical methods).
+Residuals targeting circular insertion at $r_{\text{target}}$:
+
+$$F_1(\mathbf{u})=r_{\text{cut}}(\mathbf{u})-r_{\text{target}}$$
+
+$$F_2(\mathbf{u})=v_{\text{cut}}(\mathbf{u})-\sqrt{\frac{\mu}{r_{\text{target}}}}$$
+
+Integrate the ODEs with adaptive Runge–Kutta (e.g., Dopri5/Tsit5) and explicit event detection; solve the 2D root-finding problem with a robust nonlinear solver.
 
 ---
 
@@ -136,7 +229,7 @@ Rotation composition (convention to be fixed in implementation):
 
 ## Telemetry outputs
 
-The simulator produces time series exportable as **CSV/JSON** (and consumable by the frontend), e.g.:
+The simulator produces time series exportable as **JSON** (and consumable by the frontend), e.g.:
 
 - `time_s`
 - `x_m`, `y_m` (and optional `z_m`)
@@ -152,22 +245,26 @@ The simulator produces time series exportable as **CSV/JSON** (and consumable by
 
 ---
 
-## Repository layout (proposed)
+## Repository layout
 
 > Structure may evolve; the intent is to separate physics, solver, models, and the web layer.
 
 ```text
 apogee/
-  backend/
-    app/
-      api/            # FastAPI routes
-      core/           # configuration
-      simulation/     # physics engine + models
-      telemetry/      # CSV/JSON exporters
+  packages/
+    apogee-core/        # rocket ascent physics (pure math)
+    apogee-orbit/       # orbital mechanics & propagation
+    apogee-guidance/    # yaw steering, sun-pointing, optimization
+    apogee-atmos/       # atmosphere models (USSA76 wrapper)
+  services/
+    apogee-api/         # FastAPI backend ONLY
   frontend/
-    src/              # React UI + plots
-  resources/          # images and materials
-  docker-compose.yml
+    apogee-ui/          # Three.js / WebGL frontend
+  experiments/          # notebooks, prototypes (non-production)
+  docs/                 # LaTeX, derivations, reports
+  scripts/              # CI / automation utilities
+  pyproject.toml
+  uv.lock
 ```
 
 ---
@@ -182,10 +279,30 @@ apogee/
 
 ---
 
+## References
+
+### Project derivations
+
+- [`docs/nm_final_project.tex`](docs/nm_final_project.tex)
+- [`docs/nm_final_project.pdf`](docs/nm_final_project.pdf)
+- [`docs/final_project_nm.pdf`](docs/final_project_nm.pdf)
+
+### IEEE references 
+
+[1] SpaceX, “Falcon User’s Guide,” May 9, 2025. [Online]. Available: <https://www.spacex.com/assets/media/falcon-users-guide-2025-05-09.pdf>. Accessed: 2026-01-10.
+
+[2] SpaceX, “Falcon 9,” (vehicle overview page). [Online]. Available: <https://www.spacex.com/vehicles/falcon-9/>. Accessed: 2026-01-10.
+
+[3] NASA, “U.S. Standard Atmosphere, 1976 (NASA-TM-X-74335),” 1976. [Online]. Available: <https://ntrs.nasa.gov/api/citations/19770009539/downloads/19770009539.pdf>. Accessed: 2026-01-10.
+
+[4] PyPI, “ussa1976.” [Online]. Available: <https://pypi.org/project/ussa1976/>. Accessed: 2026-01-10.
+
+[5] USSA1976 Documentation, “The U.S. Standard Atmosphere 1976 model.” [Online]. Available: <https://ussa1976.readthedocs.io/>. Accessed: 2026-01-10.
+
 ## Engineering standards (recommended)
 
 - **Strict type hints** (e.g., `mypy --strict`)
-- Lint/format: `ruff` + `black`
+- Lint/format: `ruff`
 - Tests: `pytest` (validate RK4 on reference problems: harmonic oscillator, ideal circular orbit)
 - Reproducibility: fixed seeds if stochastic perturbations are added later
 
@@ -193,10 +310,8 @@ apogee/
 
 ## Technical roadmap
 
-1. Define data models: `Stage`, `RocketState`, `EnvironmentParams`.
-2. Implement forces: gravity, drag, thrust.
-3. Implement RK4 and validate against reference cases.
-4. Add events: burnout, staging, parameter switches.
-5. Telemetry + export.
-6. FastAPI + React + Docker integration.
-
+1. Implement `apogee-atmos` USSA76 wrapper (`rho(h)`, `a_s(h)`), with unit tests.
+2. Implement `apogee-core` ascent ODE RHS + explicit events (pitch-over, staging, cutoff).
+3. Implement `apogee-orbit` orbit diagnostics ($\varepsilon$, $h_{\text{ang}}$, $a,e,r_{apo},r_{peri}$).
+4. Implement mission shooting (solve $[\theta_0, m_{\text{cut}}]$ for circular insertion) with adaptive RK + event detection.
+5. Add `apogee-api` adapters (validation + JSON I/O) and `apogee-ui` visualization consuming JSON.
