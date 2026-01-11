@@ -129,27 +129,36 @@ def simulate_falcon9_to_orbit(
     earth = EarthParams(r_e=6_371_000.0, mu=3.986004418e14, g0=9.80665)
     mission = MissionParams(h_target=h_target, payload_mass=payload_mass)
     
-    # Auto-select guidance parameters based on altitude
+    # Empirically-tuned parameter scaling
+    # Baseline: 200 km, 0 kg payload → theta0=8°, t_coast=50s, t_burn2=240s
     if theta0_deg is None or t_coast is None or t_burn2 is None:
-        # Use validated parameters for 200 km
-        # For other altitudes, scale appropriately
         h_km = h_target / 1000.0
         
-        if h_km <= 250:
-            # Low orbits: use 200 km parameters
-            theta0_deg = GUIDANCE_200KM['theta0_deg']
-            t_coast = GUIDANCE_200KM['t_coast']
-            t_burn2 = GUIDANCE_200KM['t_burn2']
-        elif h_km <= 350:
-            # Medium orbits: adjust parameters
-            theta0_deg = 7.0  # Shallower pitch
-            t_coast = 70.0    # Longer coast
-            t_burn2 = 260.0   # More burn time
-        else:
-            # High orbits: may not be reachable
-            theta0_deg = 6.0
-            t_coast = 90.0
-            t_burn2 = 280.0
+        # Baseline parameters (empirically validated for 200 km, 0 kg)
+        t_burn2_base = 240.0
+        theta0_base = 8.0
+        t_coast_base = 50.0
+        
+        # Scale burn time based on altitude
+        # Higher altitude needs slightly more delta-v
+        # 200 km → 240s, 250 km → 250s, 300 km → 260s
+        t_burn2 = t_burn2_base + (h_km - 200.0) * 0.2
+        
+        # Scale burn time based on payload
+        # More payload → less fuel available → shorter burn
+        # Each 1000 kg payload reduces burn by ~5 seconds
+        t_burn2 -= (payload_mass / 1000.0) * 5.0
+        
+        # Clamp to reasonable range
+        t_burn2 = max(180.0, min(280.0, t_burn2))
+        
+        # Pitch angle: higher altitude needs shallower pitch
+        theta0_deg = theta0_base - (h_km - 200.0) / 100.0
+        theta0_deg = max(6.0, min(9.0, theta0_deg))
+        
+        # Coast time: higher altitude needs longer coast
+        t_coast = t_coast_base + (h_km - 200.0) * 0.2
+        t_coast = max(30.0, min(90.0, t_coast))
     
     # Numerics
     numerics = NumericsParams(

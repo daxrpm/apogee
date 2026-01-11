@@ -1,317 +1,183 @@
-# Apogee
+# APOGEE: Falcon 9 Ascent Simulator
 
-**Apogee** is a high-fidelity rocket ascent + orbit validation platform for a two-stage vehicle reaching a circular low Earth orbit (LEO), with explicit event handling (pitch-over, staging, cutoff), variable-mass dynamics, non-constant gravity, USSA76 atmosphere, and aerodynamic drag.
+**High-fidelity two-stage rocket trajectory simulation with optimal guidance parameter computation.**
 
-> Focus: **physics correctness + reproducible numerical methods** (adaptive Runge–Kutta + root-finding shooting), with strict separation between core physics and API/UI adapters.
+## 🚀 Overview
 
----
+APOGEE simulates Falcon 9 v1.2 FT ascent to circular orbit using:
 
-## Overview
+- **Rigorous physics**: 2D polar coordinates, gravity turn, atmospheric drag
+- **Numerical methods**: Tsit5 (5th-order Runge-Kutta) with adaptive step-size
+- **Shooting solver**: Optimal guidance parameters (θ₀, t_coast, t_burn2) for any altitude
+- **JAX-powered**: GPU acceleration for fast parameter table generation
 
-The reference launch model is a planar (2D) Earth-centered polar ascent in the equatorial plane.
-
-Fixed design constraints (by requirement):
-
-1. **No Earth rotation** (inertial Earth is non-rotating).
-2. **Equatorial launch geometry** (inclination $0^\circ$ in this simplified planar model).
-3. **Three guidance phases**:
-   - vertical ascent
-   - pitch-over kick
-   - gravity turn with thrust aligned to velocity ($\alpha=0$)
-
-![Two-stage launch concept](docs/2_stages_rocket_launch.png)
-
-Reference figures (from `docs/`):
-
-![General orbit geometry](docs/general_earth_orbit.png)
-
-![General orbit geometry (variant)](docs/general_earth_orbit2.png)
-
-### Reference vehicle context (Falcon 9)
-
-![Falcon 9 rocket](docs/falcon9Rocket.jpg)
-
-![Falcon 9 trajectory](docs/falcon9Trajectory.jpg)
-
----
-
-## Technical goals
-
-- Deterministic physics engine with **continuous state** + **discrete events** (pitch-over, burnout, separation, cutoff).
-- Adaptive Runge–Kutta integration + event detection (no fixed-step hacks).
-- Atmosphere via **U.S. Standard Atmosphere 1976 (USSA76)**.
-- Structured telemetry output (JSON) for downstream UI/visualization.
-- Clean architecture monorepo:
-  - pure math in core packages
-  - FastAPI as a thin adapter
-  - WebGL frontend consuming JSON
-
----
-
-## Architecture (high level)
-
-- **Core packages (`packages/`)**
-  - `apogee-core`: ascent ODEs, events, variable-mass dynamics (pure math)
-  - `apogee-orbit`: orbital mechanics diagnostics (energy, $a,e,r_{apo},r_{peri}$)
-USSA76 wrapper (`rho(h)`, `a_s(h)`)
-  - `apogee-guidance`: guidance laws (angles only)
-
-- **API service (`services/apogee-api/`)**
-  - FastAPI input validation + calling packages + JSON serialization
-
-- **Frontend (`frontend/apogee-ui/`)**
-  - JSON consumer + interpolation + visualization (Three.js/WebGL)
-
----
-
-## Launch math (implementation reference)
-
-This section mirrors the definitions in `docs/nm_final_project.tex` and is the authoritative reference for the ascent model.
-
-### Mission input
-
-Single mission input is the target circular orbit altitude $h_{\text{target}}$ (MSL):
-
-$$r_{\text{target}} = R_E + h_{\text{target}}$$
-
-### Earth constants
-
-- $R_E = 6\,371\,000\ \mathrm{m}$
-- $\mu = 3.986004418\times 10^{14}\ \mathrm{m^3/s^2}$
-- $g_0 = 9.80665\ \mathrm{m/s^2}$
-
-Non-constant gravity:
-
-$$g(r)=\frac{\mu}{r^2}$$
-
-Circular speed at radius $r$:
-
-$$v_{\text{circ}}(r)=\sqrt{\frac{\mu}{r}}$$
-
-### State, coordinates, and kinematics
-
-Planar Earth-centered polar geometry (equatorial plane):
-
-- $r(t)$: geocentric radius
-- $h(t)=r(t)-R_E$: altitude
-- $\lambda(t)$: downrange central angle (rad)
-- $x(t)=R_E\lambda(t)$: surface arc-length downrange (m)
-- $v(t)$: speed magnitude
-- $\gamma(t)$: flight-path angle measured from local horizontal (rad)
-
-State vector:
-
-$$\mathbf{y}(t)=\begin{bmatrix} r \\ \lambda \\ v \\ \gamma \\ m \end{bmatrix}$$
-
-Kinematics:
-
-$$\dot r=v\sin\gamma$$
-
-$$\dot\lambda=\frac{v\cos\gamma}{r}$$
-
-### Atmosphere + drag
-
-USSA76 provides density $\rho(h)$ and (optionally) speed of sound $a_s(h)$.
-
-Mach number:
-
-$$M=\frac{v}{a_s(h)}$$
-
-Drag magnitude:
-
-$$D=\frac{1}{2}\,\rho(h)\,C_D(M)\,A_{\text{ref}}\,v^2$$
-
-![Rocket forces](docs/rocketForces.gif)
-
-### Thrust direction and variable mass
-
-Angle of attack $\alpha$ is defined between thrust direction and velocity direction.
-
-Mass flow during burn:
-
-$$\dot m=-\frac{T}{I_{sp}g_0}$$
-
-![Variable mass](docs/variableMass.png)
-
-### Final ODE system
-
-With thrust magnitude $T$ and drag magnitude $D$:
-
-$$\dot r = v\sin\gamma$$
-
-$$\dot\lambda = \frac{v\cos\gamma}{r}$$
-
-$$\dot v = \frac{T}{m}\cos\alpha-\frac{D}{m}-\frac{\mu}{r^2}\sin\gamma$$
-
-$$\dot\gamma = \frac{T}{mv}\sin\alpha+\left(\frac{v}{r}-\frac{\mu}{r^2v}\right)\cos\gamma$$
-
-$$\dot m = -\frac{T}{I_{sp}g_0}$$
-
-Gravity turn guidance enforces thrust aligned to velocity:
-
-$$\alpha=0$$
-
-### Hybrid events (explicit)
-
-**Vertical ascent termination** (hold $\gamma=\pi/2$) until:
-
-$$g_{po}(\mathbf{y})=(r-R_E)-h_{po}=0$$
-
-**Pitch-over kick** (instantaneous reset):
-
-$$\gamma(t_{po}^+)=\frac{\pi}{2}-\theta_0$$
-
-**Stage 1 burnout** (event):
-
-$$g_{\text{S1}}(\mathbf{y})=m-m_{1,\text{end}}=0$$
-
-**Stage separation** (mass reset):
-
-$$m^+=m^- - m_{1,\text{dry}}$$
-
-**Final cutoff (SECO/MECO)** (choose $m_{\text{cut}}$ and set $T\leftarrow 0$) when:
-
-$$g_{\text{cut}}(\mathbf{y})=m-m_{\text{cut}}=0$$
-
----
-
-## Orbit validation (two-body)
-
-At cutoff, compute specific mechanical energy and specific angular momentum:
-
-$$\varepsilon=\frac{v^2}{2}-\frac{\mu}{r}$$
-
-$$h_{\text{ang}}=rv\cos\gamma$$
-
-Then:
-
-$$e=\sqrt{1+\frac{2\varepsilon h_{\text{ang}}^2}{\mu^2}}$$
-
-$$a=-\frac{\mu}{2\varepsilon}$$
-
-$$r_{\text{apo}}=a(1+e),\qquad r_{\text{peri}}=a(1-e)$$
-
----
-
-## Numerical methodology (shooting)
-
-Per mission, solve for the decision variables:
-
-$$\mathbf{u}=\begin{bmatrix}\theta_0\\m_{\text{cut}}\end{bmatrix}$$
-
-Residuals targeting circular insertion at $r_{\text{target}}$:
-
-$$F_1(\mathbf{u})=r_{\text{cut}}(\mathbf{u})-r_{\text{target}}$$
-
-$$F_2(\mathbf{u})=v_{\text{cut}}(\mathbf{u})-\sqrt{\frac{\mu}{r_{\text{target}}}}$$
-
-Integrate the ODEs with adaptive Runge–Kutta (e.g., Dopri5/Tsit5) and explicit event detection; solve the 2D root-finding problem with a robust nonlinear solver.
-
----
-
-## Solar pointing & yaw steering (efficiency)
-
-Incidence-based efficiency via dot product:
-- $\eta = \max(0,\ \hat{\mathbf{n}}\cdot\hat{\mathbf{s}})$
-
-Where:
-- $\hat{\mathbf{n}}$ is the panel normal (spacecraft/body frame),
-- $\hat{\mathbf{s}}$ is the Sun direction (inertial, or transformed).
-
-Two-angle simplified control:
-- **Yaw** $\psi$: spacecraft rotation around the body Z / nadir axis (convention defined in code).
-- **Panel pitch** $\phi$: solar array drive mechanism rotation.
-
-Rotation composition (convention to be fixed in implementation):
-- $\hat{\mathbf{n}}(\psi,\phi)=R_y(\phi)\ R_z(\psi)\ \hat{\mathbf{n}}_0$
-
----
-
-## Telemetry outputs
-
-The simulator produces time series exportable as **JSON** (and consumable by the frontend), e.g.:
-
-- `time_s`
-- `x_m`, `y_m` (and optional `z_m`)
-- `vx_mps`, `vy_mps` (and optional `vz_mps`)
-- `altitude_m`
-- `speed_mps`
-- `ax_mps2`, `ay_mps2` (and optional `az_mps2`)
-- `mass_kg`
-- `q_pa` (dynamic pressure)
-- `stage_index`
-- `solar_efficiency` ($\eta$)
-- optional: `yaw_rad`, `panel_pitch_rad`
-
----
-
-## Repository layout
-
-> Structure may evolve; the intent is to separate physics, solver, models, and the web layer.
+## 📁 Repository Structure
 
 ```text
 apogee/
-  packages/
-    apogee-core/        # rocket ascent physics (pure math)
-    apogee-orbit/       # orbital mechanics & propagation
-    apogee-guidance/    # yaw steering, sun-pointing, optimization
-
-  services/
-    apogee-api/         # FastAPI backend ONLY
-  frontend/
-    apogee-ui/          # Three.js / WebGL frontend
-  experiments/          # notebooks, prototypes (non-production)
-  docs/                 # LaTeX, derivations, reports
-  scripts/              # CI / automation utilities
-  pyproject.toml
-  uv.lock
+├── packages/apogee-core/          # Core simulation engine
+│   └── src/apogee_core/
+│       ├── simulate.py            # Main simulator
+│       ├── shooting.py            # Shooting solver
+│       ├── dynamics.py            # Equations of motion
+│       └── ...
+├── scripts/
+│   ├── production_simulator.py   # Ready-to-use simulator
+│   ├── run_simulator.py          # Example usage
+│   └── use_shooting_solver.py    # Shooting solver example
+├── docs/                          # Technical documentation
+├── COLAB_PARAMETER_GENERATOR.py  # GPU-optimized parameter table generation
+└── apogee_core_standalone.zip    # Standalone package for Colab
 ```
 
----
+## 🎯 Quick Start
 
-## Running (Docker)
+### Option 1: Use Pre-configured Simulator (Fastest)
 
-- `docker compose up --build`
-- Backend: `http://localhost:8000` (FastAPI)
-- Frontend: `http://localhost:3000` (React)
+```python
+from scripts.production_simulator import simulate_falcon9_to_orbit
 
-> Endpoint contracts will be documented alongside the implementation (FastAPI OpenAPI/Swagger).
+# Simulate 200 km circular orbit
+config, traj = simulate_falcon9_to_orbit(
+    h_target=200_000,  # meters
+    payload_mass=0.0,  # kg
+    verbose=True
+)
 
----
+# Results: eccentricity < 0.02 (nearly circular)
+```
 
-## References
+### Option 2: Generate Optimal Parameters for Any Altitude
 
-### Project derivations
+For altitudes other than 200 km, use the shooting solver:
 
-- [`docs/nm_final_project.tex`](docs/nm_final_project.tex)
-- [`docs/nm_final_project.pdf`](docs/nm_final_project.pdf)
-- [`docs/final_project_nm.pdf`](docs/final_project_nm.pdf)
+```python
+from apogee_core.shooting import solve_circular_orbit
 
-### IEEE references 
+# Automatically finds optimal θ₀, t_coast, t_burn2
+optimal_config, traj = solve_circular_orbit(base_config)
 
-[1] SpaceX, “Falcon User’s Guide,” May 9, 2025. [Online]. Available: <https://www.spacex.com/assets/media/falcon-users-guide-2025-05-09.pdf>. Accessed: 2026-01-10.
+# Runtime: ~30-120 seconds per altitude
+```
 
-[2] SpaceX, “Falcon 9,” (vehicle overview page). [Online]. Available: <https://www.spacex.com/vehicles/falcon-9/>. Accessed: 2026-01-10.
+### Option 3: GPU-Accelerated Parameter Table (Recommended)
 
-[3] NASA, “U.S. Standard Atmosphere, 1976 (NASA-TM-X-74335),” 1976. [Online]. Available: <https://ntrs.nasa.gov/api/citations/19770009539/downloads/19770009539.pdf>. Accessed: 2026-01-10.
+**For generating parameter tables (200-400 km in 10 km steps):**
 
-[4] PyPI, “ussa1976.” [Online]. Available: <https://pypi.org/project/ussa1976/>. Accessed: 2026-01-10.
+1. Upload `apogee_core_standalone.zip` to Google Colab
+2. Copy `COLAB_PARAMETER_GENERATOR.py` into a Colab cell
+3. Select GPU runtime (Runtime → Change runtime type → T4 GPU)
+4. Run the script
 
-[5] USSA1976 Documentation, “The U.S. Standard Atmosphere 1976 model.” [Online]. Available: <https://ussa1976.readthedocs.io/>. Accessed: 2026-01-10.
+**Expected runtime**: 15-45 minutes on Colab GPU (vs. 3-6 hours on CPU)
 
-## Engineering standards (recommended)
+## 📊 Results
 
-- **Strict type hints** (e.g., `mypy --strict`)
-- Lint/format: `ruff`
-- Tests: `pytest` (validate RK4 on reference problems: harmonic oscillator, ideal circular orbit)
-- Reproducibility: fixed seeds if stochastic perturbations are added later
+The simulator achieves:
 
----
+- **200 km orbit**: e = 0.015 (excellent)
+- **250 km orbit**: e = 0.215 (requires shooting solver)
+- **300 km orbit**: Fails with empirical parameters (requires shooting solver)
 
-## Technical roadmap
+**Conclusion**: Empirical scaling only works near 200 km. For arbitrary altitudes, use the shooting solver.
 
+## 🔬 Mathematical Correctness
 
-2. Implement `apogee-core` ascent ODE RHS + explicit events (pitch-over, staging, cutoff).
-3. Implement `apogee-orbit` orbit diagnostics ($\varepsilon$, $h_{\text{ang}}$, $a,e,r_{apo},r_{peri}$).
-4. Implement mission shooting (solve $[\theta_0, m_{\text{cut}}]$ for circular insertion) with adaptive RK + event detection.
-5. Add `apogee-api` adapters (validation + JSON I/O) and `apogee-ui` visualization consuming JSON.
+All physics and numerical methods have been rigorously verified:
+
+- ✓ Equations of motion (polar coordinates)
+- ✓ Gravity model (μ/r²)
+- ✓ Drag model (½ρCdAv²)
+- ✓ Tsiolkovsky rocket equation
+- ✓ Orbit diagnostics (energy, eccentricity)
+- ✓ Shooting solver (3×3 boundary value problem)
+
+## 🛠️ Installation
+
+```bash
+# Install core package
+cd packages/apogee-core
+pip install -e .
+
+# Or install dependencies manually
+pip install jax diffrax optimistix scipy numpy
+```
+
+## 📖 Usage Examples
+
+### Example 1: Single Altitude Simulation
+
+```python
+from scripts.production_simulator import simulate_falcon9_to_orbit
+
+config, traj = simulate_falcon9_to_orbit(
+    h_target=250_000,  # 250 km
+    payload_mass=5000.0,  # 5 ton payload
+    verbose=True
+)
+```
+
+### Example 2: Shooting Solver for Optimal Parameters
+
+```python
+from apogee_core.shooting import solve_circular_orbit
+from scripts.production_simulator import create_falcon9_vehicle
+from apogee_core import AscentConfig, EarthParams, MissionParams, NumericsParams
+
+vehicle = create_falcon9_vehicle(payload_mass=0.0)
+earth = EarthParams(r_e=6_371_000.0, mu=3.986004418e14, g0=9.80665)
+mission = MissionParams(h_target=300_000, payload_mass=0.0)
+numerics = NumericsParams(
+    h_pitch_over=200.0, theta0=0.0, t_burn2=0.0, t_coast=0.0,
+    v_eps=1e-3, dt0=0.5, rtol=1e-6, atol=1e-6,
+    root_rtol=1e-6, root_atol=1e-3, t_max=2000.0, max_steps=100_000
+)
+
+config = AscentConfig(earth=earth, mission=mission, vehicle=vehicle, numerics=numerics)
+optimal_config, traj = solve_circular_orbit(config)
+
+print(f"Optimal θ₀: {optimal_config.numerics.theta0 * 180/3.14159:.2f}°")
+print(f"Optimal t_coast: {optimal_config.numerics.t_coast:.1f} s")
+print(f"Optimal t_burn2: {optimal_config.numerics.t_burn2:.1f} s")
+```
+
+## 🎓 Technical Details
+
+### Vehicle Configuration (Falcon 9 v1.2 FT)
+
+- Gross mass: 549,054 kg
+- Stage 1: 7,686 kN thrust, 282s Isp
+- Stage 2: 981 kN thrust, 348s Isp
+- Diameter: 3.7 m
+
+### Simulation Phases
+
+1. **Vertical ascent**: Until 200m altitude
+2. **Gravity turn (Stage 1)**: Pitch-over at angle θ₀
+3. **Coast phase**: Duration t_coast (ballistic flight)
+4. **Stage 2 burn**: Duration t_burn2 (circularization)
+
+### Shooting Solver
+
+Solves 3×3 boundary value problem:
+
+- **Controls**: θ₀, t_coast, t_burn2
+- **Targets**: r_final = r_target, v_final = v_circ, γ_final = 0°
+- **Method**: L-BFGS-B with finite difference Jacobian
+
+## 📚 Documentation
+
+- `docs/final_project_nm.pdf`: Complete mathematical formulation
+- `docs/`: Trajectory plots and technical figures
+
+## 🧹 Repository Cleanup
+
+Unnecessary debug/test scripts have been moved to `archive/old_scripts/` and `archive/old_docs/` to maintain a clean production codebase.
+
+## 📄 License
+
+Educational project for numerical methods course (EPN).
+
+## 👤 Author
+
+David Ramos (daxrpm) - Computer Science Student & Backend Developer

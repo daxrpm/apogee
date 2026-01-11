@@ -11,3 +11,9 @@
 .vscode
 .windsurf
 .cursor
+
+# python files
+__pycache__
+*.pyc
+*.pyo
+*.pyd

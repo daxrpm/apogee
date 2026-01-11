@@ -160,7 +160,9 @@ def _get_last_state(ts: Array, ys: Array) -> Array:
         return ys[-1]
 
 
-@jax.jit
+# TEMPORARY: JIT disabled to fix payload mass bug
+# @jax.jit causes caching that ignores payload_mass value changes
+# TODO: Re-enable with proper static_argnums after fixing
 def simulate_ascent(config: AscentConfig) -> Trajectory:
     earth = config.earth
     vehicle = config.vehicle
@@ -263,8 +265,8 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         g1=g1_b,
     )
 
-    y_sep = y_b_end
-    y_sep = y_sep.at[_M].set(y_sep[_M] - vehicle.m1_dry)
+    # Apply separation: remove stage 1 dry mass
+    y_sep = y_b_end.at[_M].set(y_b_end[_M] - vehicle.m1_dry)
 
     # Coast Phase (New Phase C)
     # -------------------------
@@ -302,11 +304,23 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     t0_d = _get_last_state(ts_coast, ts_coast.reshape(-1, 1))[0]
     t1_d = t0_d + numerics.t_burn2
 
+    # CRITICAL FIX: Add fuel depletion event to stop when m = m2_dry + payload
+    mission = config.mission
+    m_min_s2 = vehicle.m2_dry + mission.payload_mass
+    
+    # Create event condition that captures m_min_s2 in closure
+    def cond_fuel_depletion(t, y, args, **kwargs):
+        """Event triggers when mass reaches minimum (m2_dry + payload).
+        Returns positive when m > m_min, zero at m = m_min, negative when m < m_min.
+        Event triggers on zero crossing (when mass reaches minimum).
+        """
+        return y[_M] - m_min_s2  # Use closure variable
+    
+    event_fuel = diffrax.Event(cond_fuel_depletion, root_finder=root_finder)
+    
     term_s2 = diffrax.ODETerm(
         lambda t, y, args: rhs_gravity_turn(t=t, y=y, earth=args[0], stage=args[1], atmos=args[2], v_eps=args[3])
     )
-    # Note: We don't need m_cut in args anymore, just physics params. 
-    # But rhs_gravity_turn args signature is (earth, stage, atmos, v_eps).
     args_s2 = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps))
 
     ts_d, ys_d, result_d = _solve_segment(
@@ -317,7 +331,7 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         dt0=numerics.dt0,
         y0=y_coast_end,
         args=args_s2,
-        event=None, # Fixed time duration
+        event=event_fuel,  # Stop at fuel depletion OR t1_d
         rtol=numerics.rtol,
         atol=numerics.atol,
         max_steps=numerics.max_steps,
