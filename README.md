@@ -53,7 +53,7 @@ Reference figures (from `docs/`):
 - **Core packages (`packages/`)**
   - `apogee-core`: ascent ODEs, events, variable-mass dynamics (pure math)
   - `apogee-orbit`: orbital mechanics diagnostics (energy, $a,e,r_{apo},r_{peri}$)
-  - `apogee-atmos`: USSA76 wrapper (`rho(h)`, `a_s(h)`)
+USSA76 wrapper (`rho(h)`, `a_s(h)`)
   - `apogee-guidance`: guidance laws (angles only)
 
 - **API service (`services/apogee-api/`)**
@@ -255,7 +255,7 @@ apogee/
     apogee-core/        # rocket ascent physics (pure math)
     apogee-orbit/       # orbital mechanics & propagation
     apogee-guidance/    # yaw steering, sun-pointing, optimization
-    apogee-atmos/       # atmosphere models (USSA76 wrapper)
+
   services/
     apogee-api/         # FastAPI backend ONLY
   frontend/
@@ -310,7 +310,7 @@ apogee/
 
 ## Technical roadmap
 
-1. Implement `apogee-atmos` USSA76 wrapper (`rho(h)`, `a_s(h)`), with unit tests.
+
 2. Implement `apogee-core` ascent ODE RHS + explicit events (pitch-over, staging, cutoff).
 3. Implement `apogee-orbit` orbit diagnostics ($\varepsilon$, $h_{\text{ang}}$, $a,e,r_{apo},r_{peri}$).
 4. Implement mission shooting (solve $[\theta_0, m_{\text{cut}}]$ for circular insertion) with adaptive RK + event detection.
