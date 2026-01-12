@@ -7,25 +7,40 @@ The implementation is designed to be:
 - **Mathematically explicit** (state, forces, events, orbital diagnostics).
 - **Numerically strict** (adaptive RK + event root-finding; bounded shooting variables; robust failure modes).
 - **Backend/frontend-ready** (JSON-serializable trajectory for FastAPI + Three.js).
+- **Modular architecture** (physics engine, launch simulator, orbital mechanics, REST API).
 
-## Repository layout (current)
+## Repository layout
 
 ```text
 apogee/
 ├── packages/
-│   └── apogee-core/
-│       └── src/apogee_core/
-│           ├── atmosphere.py   # USSA76 table + interpolation
-│           ├── dynamics.py     # ODE RHS and derived quantities
-│           ├── simulate.py     # Hybrid simulation + events (Diffrax)
-│           ├── orbit.py        # Two-body orbit diagnostics
-│           ├── shooting.py     # LM+Broyden shooting solver
-│           ├── trajectory.py   # Trajectory dataclass + JSON serializer
-│           ├── types.py        # Dataclasses (Earth/Mission/Vehicle/Numerics)
-│           └── calibration.py  # Optional offline calibration (SciPy)
-├── scripts/
-│   ├── production_simulator.py # Single-case runner + JSON result
-│   └── run_simulator.py        # Sweep runner (timeout + continuation)
+│   ├── apogee-physics/         # Physics engine (JAX/Diffrax)
+│   │   └── src/apogee_physics/
+│   │       ├── atmosphere.py   # USSA76 table + interpolation
+│   │       ├── dynamics.py     # ODE RHS and derived quantities
+│   │       ├── simulate.py     # Hybrid simulation + events (Diffrax)
+│   │       ├── orbit.py        # Two-body orbit diagnostics
+│   │       ├── shooting.py     # LM+Broyden shooting solver
+│   │       ├── trajectory.py   # Trajectory dataclass + JSON serializer
+│   │       ├── types.py        # Dataclasses (Earth/Mission/Vehicle/Numerics)
+│   │       └── calibration.py  # Optional offline calibration (SciPy)
+│   │
+│   ├── apogee-launch/          # Launch simulator + CLI
+│   │   └── src/apogee_launch/
+│   │       ├── simulator.py    # High-level launch API
+│   │       ├── falcon9.py      # Falcon 9 default parameters
+│   │       └── cli.py          # CLI with typer
+│   │
+│   ├── apogee-orbit/           # Orbital mechanics (future)
+│   │   └── src/apogee_orbit/
+│   │       └── (propagator, solar, attitude)
+│   │
+│   └── apogee-api/             # FastAPI backend
+│       └── src/apogee_api/
+│           ├── main.py         # FastAPI app
+│           ├── routers/        # Endpoints (launch, orbit, health)
+│           └── schemas/        # Pydantic models
+│
 └── docs/
     ├── nm_final_project.tex    # Full math report (code-consistent)
     └── nm_final_project.pdf
@@ -76,29 +91,33 @@ Numerical method:
 
 ## Install
 
-Core package:
+Install all packages using uv workspace:
 
 ```bash
-pip install -e packages/apogee-core
+uv sync
 ```
 
-## Run: single case (JSON output)
+This installs all packages in editable mode with proper dependency resolution.
 
-This is the **backend-ready** entry point.
+## Usage
 
-### Print full JSON (includes full trajectory arrays)
+### CLI: Launch Simulator
+
+Run single launch simulation:
 
 ```bash
-python -u scripts/production_simulator.py --h-target-km 200 --payload-kg 5000
+# With full trajectory
+uv run apogee-launch --h-target-km 213 --payload-kg 4082
+
+# Summary only (no trajectory)
+uv run apogee-launch --h-target-km 213 --payload-kg 4082 --no-trajectory
+
+# With custom initial guesses
+uv run apogee-launch --h-target-km 200 --payload-kg 5000 \
+  --theta0-deg 8.0 --t-coast 50.0 --t-burn2 300.0
 ```
 
-### Print only summary (no trajectory)
-
-```bash
-python -u scripts/production_simulator.py --h-target-km 200 --payload-kg 5000 --no-trajectory
-```
-
-The JSON schema is stable and includes:
+The JSON output schema is stable and includes:
 
 - `schema_version`
 - `inputs` (`h_target_km`, `payload_kg`)
@@ -106,16 +125,47 @@ The JSON schema is stable and includes:
 - `summary` (`ecc`, `h_err_m`, `v_err_mps`, `gamma_deg`)
 - `trajectory` (if enabled) — arrays with explicit unit suffixes
 
-## Run: sweep with timeout + continuation
+### Python API
 
-```bash
-python -u scripts/run_simulator.py
+Use directly from Python:
+
+```python
+from apogee_launch import solve_to_circular_orbit
+
+result = solve_to_circular_orbit(
+    h_target_km=213.0,
+    payload_kg=4082.0,
+    include_trajectory=True,
+)
+
+print(f"Eccentricity: {result.summary['ecc']:.6f}")
+print(f"Altitude error: {result.summary['h_err_m']:.1f} m")
 ```
 
-This runs a grid sweep of altitudes/payloads with:
+### FastAPI Backend
 
-- per-case timeout
-- continuation (warm-starting numerics from the previous converged case)
+Start the API server:
+
+```bash
+uv run uvicorn apogee_api.main:app --reload
+```
+
+Then access:
+- API docs: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
+- Launch simulation: `POST http://localhost:8000/launch/simulate`
+
+Example request:
+
+```bash
+curl -X POST "http://localhost:8000/launch/simulate" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "h_target_km": 213,
+    "payload_kg": 4082,
+    "include_trajectory": false
+  }'
+```
 
 ## Notes for future FastAPI + Three.js
 
