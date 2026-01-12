@@ -5,7 +5,9 @@ solves the 3x3 shooting problem to achieve circular orbit insertion.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import math
+import time
 import jax
 jax.config.update("jax_enable_x64", True)
 import numpy as np
@@ -131,114 +133,122 @@ def create_falcon9_config(h_target: float, payload_mass: float = 0.0) -> AscentC
     )
 
 
-def simulate_to_orbit(h_target: float, payload_mass: float = 0.0, verbose: bool = True):
-    """Simulate Falcon 9 ascent to circular orbit.
-    
-    Args:
-        h_target: Target altitude [m] (e.g., 200_000 for 200 km)
-        payload_mass: Payload mass [kg]
-        verbose: Print detailed results
-    
-    Returns:
-        (config, trajectory) tuple
-    """
-    if verbose:
-        print(f"=== Falcon 9 Ascent Simulator ===")
-        print(f"Target altitude: {h_target/1000:.1f} km")
-        print(f"Payload mass: {payload_mass:.1f} kg")
-        print()
-    
-    config = create_falcon9_config(h_target, payload_mass)
-    
-    if verbose:
-        print("Vehicle configuration:")
-        print(f"  Gross mass: {config.vehicle.m0:.1f} kg")
-        print(f"  Stage 1 dry: {config.vehicle.m1_dry:.1f} kg")
-        print(f"  Stage 2 dry: {config.vehicle.m2_dry:.1f} kg")
-        print(f"  Stage 1 Isp: {config.vehicle.stage1.isp:.1f} s")
-        print(f"  Stage 2 Isp: {config.vehicle.stage2.isp:.1f} s")
-        print()
-        print("Solving shooting problem...")
-    
-    try:
-        opt_config, traj = solve_circular_orbit(config)
-        
-        if verbose:
-            print("✓ Converged!")
-            print()
-            print("Optimal guidance:")
-            print(f"  Pitch-over angle: {opt_config.numerics.theta0 * 180.0 / math.pi:.3f}°")
-            print(f"  Coast duration: {opt_config.numerics.t_coast:.1f} s")
-            print(f"  Stage 2 burn: {opt_config.numerics.t_burn2:.1f} s")
-            print()
-            
-            # Extract final state
-            t_arr = np.array(traj.t)
-            mask = np.isfinite(t_arr)
-            if np.any(mask):
-                last_idx = np.max(np.where(mask)[0])
-                
-                r_final = float(traj.r[last_idx])
-                v_final = float(traj.v[last_idx])
-                gamma_final = float(traj.gamma[last_idx])
-                m_final = float(traj.m[last_idx])
-                t_final = float(traj.t[last_idx])
-                
-                r_target = config.earth.r_e + h_target
-                v_circ = math.sqrt(config.earth.mu / r_target)
-                
-                print("Final state:")
-                print(f"  Time: {t_final:.1f} s")
-                print(f"  Altitude: {(r_final - config.earth.r_e)/1000:.3f} km")
-                print(f"  Velocity: {v_final:.1f} m/s")
-                print(f"  Flight path angle: {gamma_final * 180.0 / math.pi:.4f}°")
-                print(f"  Final mass: {m_final:.1f} kg")
-                print()
-                
-                print("Orbit quality:")
-                r_err = abs(r_final - r_target)
-                v_err = abs(v_final - v_circ)
-                gamma_err = abs(gamma_final) * 180.0 / math.pi
+def _finite_last_index(t: np.ndarray) -> int:
+    mask = np.isfinite(t)
+    if not mask.any():
+        return -1
+    return int(np.sum(mask) - 1)
+
+
+def run_continuation_sweep(
+    *,
+    alts_km: list[int],
+    payloads_kg: list[int],
+    timeout_s: int = 75,
+):
+    import signal
+
+    def _timeout_handler(signum, frame):
+        raise TimeoutError(f"timeout after {timeout_s}s")
+
+    signal.signal(signal.SIGALRM, _timeout_handler)
+
+    earth = EarthParams(r_e=6_371_000.0, mu=3.986004418e14, g0=9.80665)
+
+    fails: list[tuple[int, int, str]] = []
+    oks: list[tuple[int, int, float, float, float]] = []
+
+    print("FULL continuation sweep")
+    print("alts_km:", alts_km)
+    print("payloads_kg:", payloads_kg)
+    print("timeout_s:", timeout_s, flush=True)
+
+    for payload in payloads_kg:
+        payload_mass = float(payload)
+        seed = dict(theta0=8.0 * math.pi / 180.0, t_coast=50.0, t_burn2=300.0, alpha2=0.0)
+
+        for h_km in alts_km:
+            h_target = float(h_km) * 1000.0
+            mission = MissionParams(h_target=h_target, payload_mass=payload_mass)
+            numerics = NumericsParams(
+                h_pitch_over=200.0,
+                theta0=float(seed["theta0"]),
+                t_burn2=float(seed["t_burn2"]),
+                t_coast=float(seed["t_coast"]),
+                v_eps=1e-3,
+                dt0=0.5,
+                rtol=1e-6,
+                atol=1e-6,
+                root_rtol=1e-6,
+                root_atol=1e-3,
+                t_max=2000.0,
+                max_steps=100_000,
+                alpha2=float(seed["alpha2"]),
+            )
+
+            base_config = create_falcon9_config(h_target, payload_mass)
+            base_config = replace(base_config, earth=earth, mission=mission, numerics=numerics)
+
+            label = f"h={h_km}km payload={payload}kg"
+            try:
+                t0 = time.time()
+                signal.alarm(int(timeout_s))
+                opt_config, traj = solve_circular_orbit(base_config)
+                signal.alarm(0)
+
+                idx = _finite_last_index(np.array(traj.t))
+                if idx < 0:
+                    raise RuntimeError("empty trajectory")
+                h_final = float(traj.h[idx])
+                v_final = float(traj.v[idx])
+                gamma_final = float(traj.gamma[idx])
                 ecc = float(traj.orbit.eccentricity)
-                
-                print(f"  Radius error: {r_err:.1f} m ({r_err/r_target*100:.6f}%)")
-                print(f"  Velocity error: {v_err:.2f} m/s ({v_err/v_circ*100:.4f}%)")
-                print(f"  FPA error: {gamma_err:.4f}°")
-                print(f"  Eccentricity: {ecc:.6f}")
-                print()
-                
-                if ecc < 0.001:
-                    print("✓✓✓ SUCCESS: Circular orbit achieved! ✓✓✓")
-                else:
-                    print("⚠ Warning: Orbit is not perfectly circular")
-        
-        return opt_config, traj
-        
-    except Exception as e:
-        if verbose:
-            print(f"✗ Simulation failed: {e}")
-        raise
+
+                r_target = earth.r_e + h_target
+                v_circ = math.sqrt(earth.mu / r_target)
+
+                dt = time.time() - t0
+                oks.append((h_km, payload, ecc, h_final - h_target, dt))
+                print(
+                    f"OK {label} dt_s={dt:.2f} ecc={ecc:.6g} h_err={h_final-h_target:+.1f} v_err={v_final-v_circ:+.3f} gamma_deg={gamma_final*180/math.pi:+.4f}",
+                    flush=True,
+                )
+
+                seed = dict(
+                    theta0=float(opt_config.numerics.theta0),
+                    t_coast=float(opt_config.numerics.t_coast),
+                    t_burn2=float(opt_config.numerics.t_burn2),
+                    alpha2=float(opt_config.numerics.alpha2),
+                )
+            except Exception as e:
+                signal.alarm(0)
+                msg = f"{type(e).__name__}: {e}"
+                fails.append((h_km, payload, msg))
+                print(f"FAIL {label} -> {msg}", flush=True)
+
+    print("\nSUMMARY")
+    print("ok", len(oks), "fail", len(fails))
+    if fails:
+        for h_km, payload, msg in fails:
+            print("FAIL_CASE", h_km, "km", payload, "kg", msg)
+
+    oks_sorted = sorted(oks, key=lambda x: x[2], reverse=True)
+    print("\nWORST ecc (top 10):")
+    for h_km, payload, ecc, herr, dt in oks_sorted[:10]:
+        print(f"  h={h_km}km payload={payload}kg ecc={ecc:.6g} h_err={herr:+.1f} dt_s={dt:.2f}")
+
+    herr_sorted = sorted(oks, key=lambda x: abs(x[3]), reverse=True)
+    print("\nWORST |h_err| (top 10):")
+    for h_km, payload, ecc, herr, dt in herr_sorted[:10]:
+        print(f"  h={h_km}km payload={payload}kg h_err={herr:+.1f} ecc={ecc:.6g} dt_s={dt:.2f}")
+
+    return oks, fails
 
 
 def main():
-    """Run example simulations."""
-    print("=" * 60)
-    print("APOGEE: Two-Stage Rocket Ascent Simulator")
-    print("=" * 60)
-    print()
-    
-    # Test different altitudes
-    altitudes = [200_000, 300_000, 400_000]  # 200, 300, 400 km
-    
-    for h in altitudes:
-        try:
-            config, traj = simulate_to_orbit(h, payload_mass=0.0, verbose=True)
-            print()
-            print("-" * 60)
-            print()
-        except Exception as e:
-            print(f"Failed for h={h/1000:.0f} km: {e}")
-            print()
+    alts_km = [160, 180, 200, 220, 240, 260, 280, 300, 320, 340, 360, 380, 400]
+    payloads_kg = [0, 2000, 5000, 8000, 10000]
+    run_continuation_sweep(alts_km=alts_km, payloads_kg=payloads_kg, timeout_s=75)
 
 
 if __name__ == "__main__":

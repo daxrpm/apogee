@@ -9,7 +9,11 @@ Usage:
     config, traj = simulate_falcon9_to_orbit(h_target=200_000)  # 200 km orbit
 """
 
+import argparse
+import json
 import math
+from typing import Any
+
 import jax
 jax.config.update("jax_enable_x64", True)
 import numpy as np
@@ -22,6 +26,8 @@ from apogee_core import (
     StageParams,
     VehicleParams,
     simulate_ascent,
+    solve_circular_orbit,
+    trajectory_to_dict,
 )
 from apogee_core.calibration import ConstantCd
 
@@ -48,9 +54,11 @@ GUIDANCE_200KM = {
 }
 
 
-def create_falcon9_vehicle(payload_mass: float = 0.0):
+def create_falcon9_vehicle(payload_mass: float = 0.0, *, params: dict[str, float] | None = None):
     """Create Falcon 9 vehicle configuration with correct mass budget."""
-    p = FALCON9_PARAMS
+    p = dict(FALCON9_PARAMS)
+    if params is not None:
+        p.update(params)
     g0 = 9.80665
     
     # Calculate propellant masses from mass budget
@@ -214,24 +222,24 @@ def simulate_falcon9_to_orbit(
         if verbose:
             print("✗ Simulation failed: No valid trajectory")
         return config, traj
-    
+
     last_idx = np.max(np.where(mask)[0])
-    
+
     r_final = float(traj.r[last_idx])
     v_final = float(traj.v[last_idx])
     gamma_final = float(traj.gamma[last_idx])
     m_final = float(traj.m[last_idx])
     h_final = float(traj.h[last_idx])
     t_final = float(traj.t[last_idx])
-    
+
     r_target = earth.r_e + h_target
     v_circ = math.sqrt(earth.mu / r_target)
-    
+
     r_err = abs(r_final - r_target) / r_target * 100
     v_err = abs(v_final - v_circ) / v_circ * 100
     gamma_err_deg = abs(gamma_final) * 180 / math.pi
     ecc = float(traj.orbit.eccentricity)
-    
+
     if verbose:
         print()
         print("Final state:")
@@ -247,7 +255,7 @@ def simulate_falcon9_to_orbit(
         print(f"  FPA error: {gamma_err_deg:.4f}°")
         print(f"  Eccentricity: {ecc:.6f}")
         print()
-        
+
         if ecc < 0.001:
             print("✓✓✓ EXCELLENT: Nearly perfect circular orbit!")
         elif ecc < 0.02:
@@ -256,34 +264,162 @@ def simulate_falcon9_to_orbit(
             print("✓ ACCEPTABLE: Orbit is approximately circular")
         else:
             print("⚠ WARNING: Orbit is not circular (e > 0.05)")
-    
+
     return config, traj
 
 
+def solve_falcon9_to_circular_orbit(
+    *,
+    h_target: float,
+    payload_mass: float = 0.0,
+    numerics: NumericsParams | None = None,
+    atmosphere_z_max: float = 300_000.0,
+    atmosphere_dz: float = 100.0,
+    trim: bool = True,
+):
+    vehicle, _t1_burn, _m1_prop, _m2_prop = create_falcon9_vehicle(payload_mass)
+
+    earth = EarthParams(r_e=6_371_000.0, mu=3.986004418e14, g0=9.80665)
+    mission = MissionParams(h_target=h_target, payload_mass=payload_mass)
+
+    if numerics is None:
+        numerics = NumericsParams(
+            h_pitch_over=200.0,
+            theta0=8.0 * math.pi / 180.0,
+            t_burn2=300.0,
+            t_coast=50.0,
+            v_eps=1e-3,
+            dt0=0.5,
+            rtol=1e-6,
+            atol=1e-6,
+            root_rtol=1e-6,
+            root_atol=1e-3,
+            t_max=2000.0,
+            max_steps=100_000,
+        )
+
+    base_config = AscentConfig(
+        earth=earth,
+        mission=mission,
+        vehicle=vehicle,
+        numerics=numerics,
+        atmosphere_z_max=atmosphere_z_max,
+        atmosphere_dz=atmosphere_dz,
+    )
+
+    opt_config, traj = solve_circular_orbit(base_config)
+    return opt_config, traj, trajectory_to_dict(traj, trim=trim)
+
+
+def solve_falcon9_to_circular_orbit_result(
+    *,
+    h_target_km: float,
+    payload_kg: float,
+    numerics: NumericsParams | None = None,
+    vehicle_params: dict[str, float] | None = None,
+    atmosphere_z_max: float = 300_000.0,
+    atmosphere_dz: float = 100.0,
+    trim: bool = True,
+    include_trajectory: bool = True,
+) -> dict[str, Any]:
+    if payload_kg < 0.0 or payload_kg > 10_000.0:
+        raise ValueError("payload_kg must be in [0, 10000]")
+    if h_target_km <= 0.0:
+        raise ValueError("h_target_km must be > 0")
+
+    h_target_m = float(h_target_km) * 1000.0
+    payload_mass = float(payload_kg)
+
+    vehicle, _t1_burn, _m1_prop, _m2_prop = create_falcon9_vehicle(payload_mass, params=vehicle_params)
+
+    earth = EarthParams(r_e=6_371_000.0, mu=3.986004418e14, g0=9.80665)
+    mission = MissionParams(h_target=h_target_m, payload_mass=payload_mass)
+
+    if numerics is None:
+        numerics = NumericsParams(
+            h_pitch_over=200.0,
+            theta0=8.0 * math.pi / 180.0,
+            t_burn2=300.0,
+            t_coast=50.0,
+            v_eps=1e-3,
+            dt0=0.5,
+            rtol=1e-6,
+            atol=1e-6,
+            root_rtol=1e-6,
+            root_atol=1e-3,
+            t_max=2000.0,
+            max_steps=100_000,
+            alpha2=0.0,
+        )
+
+    base_config = AscentConfig(
+        earth=earth,
+        mission=mission,
+        vehicle=vehicle,
+        numerics=numerics,
+        atmosphere_z_max=atmosphere_z_max,
+        atmosphere_dz=atmosphere_dz,
+    )
+
+    opt_config, traj = solve_circular_orbit(base_config)
+
+    t_arr = np.array(traj.t)
+    mask = np.isfinite(t_arr)
+    if not np.any(mask):
+        raise RuntimeError("No valid trajectory")
+    last_idx = int(np.sum(mask) - 1)
+
+    h_final_m = float(traj.h[last_idx])
+    v_final_mps = float(traj.v[last_idx])
+    gamma_final_rad = float(traj.gamma[last_idx])
+    ecc = float(traj.orbit.eccentricity)
+
+    r_target_m = earth.r_e + h_target_m
+    v_circ_mps = math.sqrt(earth.mu / r_target_m)
+
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "inputs": {
+            "h_target_km": float(h_target_km),
+            "payload_kg": float(payload_kg),
+        },
+        "optimal_numerics": {
+            "theta0_rad": float(opt_config.numerics.theta0),
+            "t_coast_s": float(opt_config.numerics.t_coast),
+            "t_burn2_s": float(opt_config.numerics.t_burn2),
+            "alpha2_rad": float(opt_config.numerics.alpha2),
+        },
+        "summary": {
+            "ecc": ecc,
+            "h_err_m": float(h_final_m - h_target_m),
+            "v_err_mps": float(v_final_mps - v_circ_mps),
+            "gamma_deg": float(gamma_final_rad * 180.0 / math.pi),
+        },
+    }
+
+    if include_trajectory:
+        result["trajectory"] = trajectory_to_dict(traj, trim=trim)
+
+    return result
+
+
 def main():
-    """Run example simulations."""
-    print("=" * 70)
-    print("APOGEE: Falcon 9 Ascent Simulator (Production Version)")
-    print("=" * 70)
-    print()
-    
-    # Test different altitudes
-    test_cases = [
-        (200_000, 0.0),    # 200 km, no payload
-        (250_000, 0.0),    # 250 km, no payload
-        (300_000, 0.0),    # 300 km, no payload
-        (200_000, 5000.0), # 200 km, 5 ton payload
-    ]
-    
-    for h_target, payload in test_cases:
-        try:
-            config, traj = simulate_falcon9_to_orbit(h_target, payload, verbose=True)
-            print()
-            print("-" * 70)
-            print()
-        except Exception as e:
-            print(f"✗ Failed for h={h_target/1000:.0f} km, payload={payload:.0f} kg: {e}")
-            print()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--h-target-km", type=float, default=None)
+    parser.add_argument("--payload-kg", type=float, default=None)
+    parser.add_argument("--no-trajectory", action="store_true")
+    args = parser.parse_args()
+
+    if args.h_target_km is None or args.payload_kg is None:
+        return
+
+    result = solve_falcon9_to_circular_orbit_result(
+        h_target_km=float(args.h_target_km),
+        payload_kg=float(args.payload_kg),
+        include_trajectory=not bool(args.no_trajectory),
+        trim=True,
+    )
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

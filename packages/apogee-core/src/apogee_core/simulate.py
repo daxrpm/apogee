@@ -5,6 +5,7 @@ from typing import Tuple
 import diffrax
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optimistix as optx
 
 from .atmosphere import build_atmosphere_table
@@ -102,6 +103,17 @@ def _strip_nans(ts: Array, ys: Array) -> Tuple[Array, Array]:
     if isinstance(mask, jax.core.Tracer):
         return ts, ys
     return ts[mask], ys[mask]
+
+
+def _strictly_increasing_mask(ts: Array) -> Array | None:
+    if isinstance(ts, jax.core.Tracer):
+        return None
+    ts_np = np.asarray(ts)
+    if ts_np.size == 0:
+        return jnp.array([], dtype=bool)
+    keep = np.ones(ts_np.shape, dtype=bool)
+    keep[1:] = ts_np[1:] > ts_np[:-1]
+    return jnp.asarray(keep)
 
 
 def _last_finite_index(ts: Array) -> Array:
@@ -364,6 +376,11 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     ts = jnp.concatenate([ts_a, ts_b[1:], ts_coast[1:], ts_d[1:]])
     ys = jnp.concatenate([ys_a, ys_b[1:], ys_coast[1:], ys_d[1:]], axis=0)
 
+    keep = _strictly_increasing_mask(ts)
+    if keep is not None:
+        ts = ts[keep]
+        ys = ys[keep]
+
     mask = jnp.isfinite(ts)
     idxs = jnp.where(mask, jnp.arange(ts.shape[0]), -1)
     last_idx = jnp.max(idxs)
@@ -398,6 +415,11 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     mach = jnp.concatenate([mach_a, mach_b[1:], mach_coast[1:], mach_d[1:]])
     drag = jnp.concatenate([drag_a, drag_b[1:], drag_coast[1:], drag_d[1:]])
     q = jnp.concatenate([q_a, q_b[1:], q_coast[1:], q_d[1:]])
+
+    if keep is not None:
+        mach = mach[keep]
+        drag = drag[keep]
+        q = q[keep]
 
     y_final = ys[last_idx]
     eps, h_ang, a, e, r_apo, r_peri = orbit_diagnostics(y=y_final, earth=earth)

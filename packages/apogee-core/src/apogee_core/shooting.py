@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 import math
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from .simulate import simulate_ascent, simulate_ascent_final
-from .trajectory import Trajectory
+from .trajectory import Trajectory, trajectory_to_dict
 from .types import AscentConfig
 
 Array = jax.Array
@@ -73,6 +74,14 @@ def compute_residuals(u: np.ndarray, base_config: AscentConfig) -> np.ndarray:
 
 
 def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Trajectory]:
+    # Ensure the atmosphere table covers the target altitude (and some margin) so
+    # residuals and the final trajectory are evaluated with a consistent model.
+    # This avoids relying on extrapolation behavior above atmosphere_z_max.
+    base_config = replace(
+        base_config,
+        atmosphere_z_max=max(float(base_config.atmosphere_z_max), float(base_config.mission.h_target) + 150_000.0),
+    )
+
     payload_mass = float(base_config.mission.payload_mass)
     if payload_mass < 0.0 or payload_mass > 10_000.0:
         raise ValueError("payload_mass must be in [0, 10000] kg for the robust LEO configuration")
@@ -129,7 +138,7 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
     def _newton(u0: np.ndarray) -> np.ndarray:
         x = _x_from_u(u0.astype(float))
         eval_budget = [0]
-        max_evals = 900
+        max_evals = 1400
 
         lam_max = 1.0e12
         resets = 0
@@ -144,7 +153,7 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
 
         lam = 1e-2
 
-        for _ in range(90):
+        for _ in range(130):
             if eval_budget[0] > max_evals:
                 break
             if _ok(f):
@@ -254,15 +263,17 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
     if getattr(base_config.numerics, "alpha2", 0.0) != 0.0:
         alpha2_seed = float(base_config.numerics.alpha2)
 
-    theta0_grid = np.deg2rad(np.array([5.0, 6.5, 8.0, 9.5, 11.0]))
+    theta0_grid = np.deg2rad(np.array([2.0, 3.5, 5.0, 6.5, 8.0, 9.5, 11.0]))
     t_coast_grid = np.array([0.0, 5.0, 20.0, 50.0, 80.0])
-    t_burn2_grid = np.array([180.0, 220.0, 260.0, 300.0, 340.0, 380.0, 420.0])
+    t_burn2_grid = np.array([180.0, 220.0, 260.0, 300.0, 340.0, 380.0, 400.0, 420.0])
     alpha2_grid = np.deg2rad(np.array([-12.0, -8.0, -4.0, -2.0, 0.0, 2.0, 4.0, 8.0, 12.0]))
 
     candidates: list[np.ndarray] = [
         np.array([theta0_seed, t_coast_seed, t_burn2_seed, alpha2_seed]),
         np.array([9.31 * math.pi / 180.0, 2.85, 336.4, 6.0 * math.pi / 180.0]),
         np.array([8.88 * math.pi / 180.0, 2.10, 371.3, 8.31 * math.pi / 180.0]),
+        np.array([4.0 * math.pi / 180.0, 20.0, 390.0, -6.0 * math.pi / 180.0]),
+
     ]
     for th in theta0_grid:
         for tc in t_coast_grid:
@@ -284,7 +295,7 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
     best_result = None
     best_residual = float("inf")
 
-    for _n0, u0 in scored[:24]:
+    for _n0, u0 in scored[:32]:
         try:
             u = _newton(u0)
             F = compute_residuals(u, base_config)
@@ -322,4 +333,9 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
     traj = simulate_ascent(optimal_config)
     
     return optimal_config, traj
+
+
+def solve_circular_orbit_dict(base_config: AscentConfig, *, trim: bool = True) -> tuple[AscentConfig, dict[str, Any]]:
+    cfg, traj = solve_circular_orbit(base_config)
+    return cfg, trajectory_to_dict(traj, trim=trim)
 
