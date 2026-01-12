@@ -3,13 +3,23 @@
 import json
 import logging
 import sys
+from pathlib import Path
 from typing import Optional
 
+import matplotlib.pyplot as plt
 import typer
 
+from .plotting import (
+    plot_comprehensive,
+    plot_flight_dynamics,
+    plot_mass_profile,
+    plot_time_series,
+    plot_trajectory_2d,
+)
 from .simulator import solve_to_circular_orbit
 
 app = typer.Typer(add_completion=False)
+logger = logging.getLogger(__name__)
 
 
 @app.callback(invoke_without_command=True)
@@ -22,8 +32,13 @@ def main(
     t_burn2: Optional[float] = typer.Option(None, "--t-burn2", help="Initial stage 2 burn time [s]"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging (numerical methods details)"),
+    plot: bool = typer.Option(False, "--plot", help="Generate all plots and save to plots/ directory"),
 ):
     """Simulate rocket launch to circular orbit using shooting method."""
+    
+    # Force trajectory inclusion for plotting
+    if plot:
+        no_trajectory = False
     
     # Configure logging
     log_level = logging.WARNING
@@ -75,6 +90,52 @@ def main(
         output["trajectory"] = result.trajectory
     
     print(json.dumps(output))
+    
+    # Generate all plots if requested
+    if plot and result.trajectory is not None:
+        try:
+            # Create plots directory
+            plots_dir = Path("plots")
+            plots_dir.mkdir(exist_ok=True)
+            
+            mission_params = {
+                "h_target_km": h_target_km,
+                "payload_kg": payload_kg,
+            }
+            
+            # Generate all plots
+            plot_configs = [
+                ("trajectory", plot_trajectory_2d, f"Trajectory - Target: {h_target_km}km"),
+                ("time", plot_time_series, f"Flight Parameters - Target: {h_target_km}km"),
+                ("dynamics", plot_flight_dynamics, f"Flight Dynamics - Target: {h_target_km}km"),
+                ("mass", plot_mass_profile, f"Mass Profile - Target: {h_target_km}km"),
+                ("comprehensive", plot_comprehensive, mission_params),
+            ]
+            
+            logger.info(f"Generating plots in {plots_dir}/ directory...")
+            
+            for plot_name, plot_func, plot_arg in plot_configs:
+                if plot_name == "comprehensive":
+                    fig = plot_func(result.trajectory, plot_arg)
+                else:
+                    fig = plot_func(result.trajectory, plot_arg)
+                
+                # Save plot
+                save_path = plots_dir / f"{plot_name}.png"
+                fig.savefig(save_path, dpi=300, bbox_inches='tight')
+                logger.debug(f"  Saved: {save_path}")
+                
+                # Show plot
+                plt.show()
+                plt.close(fig)
+            
+            logger.info(f"All plots generated successfully in {plots_dir}/")
+            
+        except Exception as e:
+            logger.error(f"Error generating plots: {e}")
+            if debug:
+                import traceback
+                logger.debug(traceback.format_exc())
 
 
 if __name__ == "__main__":

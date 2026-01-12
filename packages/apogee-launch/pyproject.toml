@@ -11,6 +11,7 @@ dependencies = [
     "apogee-physics",
     "typer>=0.15.0",
     "jax",
+    "matplotlib",
 ]
 
 [project.scripts]
