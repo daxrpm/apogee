@@ -59,6 +59,7 @@ class NumericsParams:
     root_atol: float
     t_max: float
     max_steps: int
+    alpha2: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

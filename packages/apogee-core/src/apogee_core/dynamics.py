@@ -74,8 +74,8 @@ def rhs_general(*, t: Array, y: Array, earth: EarthParams, stage: StageParams, a
 
     # FIX 1: Guard the LaTeX 1/v terms near v -> 0 to avoid numerical singularity.
     # For v >> v_eps this is exactly the LaTeX equation.
-    v_safe = jnp.maximum(v, v_eps)
-    dgamma = (stage.thrust / (m * v_safe)) * jnp.sin(alpha) + (v / r_safe - mu / (r_safe * r_safe * v_safe)) * jnp.cos(gamma)
+    inv_v = v / (v * v + v_eps * v_eps)
+    dgamma = (stage.thrust * inv_v / m) * jnp.sin(alpha) + (v / r_safe - (mu / (r_safe * r_safe)) * inv_v) * jnp.cos(gamma)
 
     dm = -stage.thrust / (stage.isp * earth.g0)
 

@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import optimistix as optx
 
 from .atmosphere import build_atmosphere_table
-from .dynamics import compute_derived, rhs_gravity_turn, rhs_vertical, rhs_coast
+from .dynamics import compute_derived, rhs_general, rhs_gravity_turn, rhs_vertical, rhs_coast
 from .orbit import orbit_diagnostics
 from .trajectory import OrbitDiagnostics, Trajectory
 from .types import AscentConfig, StageParams
@@ -21,6 +21,42 @@ _LAM = 1
 _V = 2
 _GAMMA = 3
 _M = 4
+
+
+def _cond_ground(t, y, args, **kwargs):
+    earth_, *_ = args
+    return y[_R] - earth_.r_e
+
+
+def _cond_pitch_over(t, y, args, **kwargs):
+    earth_, _stage, _atmos, _v_eps, h_po, *_ = args
+    return (y[_R] - earth_.r_e) - h_po
+
+
+def _cond_stage1_burnout(t, y, args, **kwargs):
+    _earth, _stage, _atmos, _v_eps, m1_end_, *_ = args
+    return y[_M] - m1_end_
+
+
+def _cond_fuel_depletion(t, y, args, **kwargs):
+    _earth, _stage, _atmos, _v_eps, m_min_s2, *_ = args
+    return y[_M] - m_min_s2
+
+
+def _term_rhs_vertical(t, y, args):
+    return rhs_vertical(t=t, y=y, earth=args[0], stage=args[1], atmos=args[2], v_eps=args[3])
+
+
+def _term_rhs_gravity_turn(t, y, args):
+    return rhs_gravity_turn(t=t, y=y, earth=args[0], stage=args[1], atmos=args[2], v_eps=args[3])
+
+
+def _term_rhs_coast(t, y, args):
+    return rhs_coast(t=t, y=y, earth=args[0], stage=args[1], atmos=args[2], v_eps=args[3])
+
+
+def _term_rhs_stage2_steer(t, y, args):
+    return rhs_general(t=t, y=y, earth=args[0], stage=args[1], atmos=args[2], alpha=args[5], v_eps=args[3])
 
 
 def _require_event(result: diffrax.RESULTS, *, name: str, hint: str) -> None:
@@ -68,6 +104,27 @@ def _strip_nans(ts: Array, ys: Array) -> Tuple[Array, Array]:
     return ts[mask], ys[mask]
 
 
+def _last_finite_index(ts: Array) -> Array:
+    mask = jnp.isfinite(ts)
+    idxs = jnp.where(mask, jnp.arange(ts.shape[0]), -1)
+    return jnp.max(idxs)
+
+
+def _event_mask_is(event_mask, index: int) -> bool:
+    if event_mask is None:
+        return False
+    try:
+        # event_mask mirrors the PyTree structure of the cond_fn passed to diffrax.Event.
+        if isinstance(event_mask, (tuple, list)):
+            return bool(event_mask[index])
+        # Single event
+        return bool(event_mask)
+    except Exception as e:
+        if isinstance(e, jax.errors.TracerBoolConversionError):
+            return False
+        raise
+
+
 def _solve_segment(*, term: diffrax.ODETerm, solver: diffrax.AbstractSolver, t0: float, t1: float, dt0: float, y0: Array, args, event: diffrax.Event | None, rtol: float, atol: float, max_steps: int):
     saveat = diffrax.SaveAt(t0=True, steps=True)
     stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol)
@@ -87,82 +144,62 @@ def _solve_segment(*, term: diffrax.ODETerm, solver: diffrax.AbstractSolver, t0:
         throw=False,
     )
     ts, ys = _strip_nans(sol.ts, sol.ys)
-    
-    # Robustness: if solver returns no steps (e.g. immediate event or failure),
-    # return the initial state as a single-point trajectory.
-    # We need to check if ts is empty.
-    # In JIT, len(ts) is static (max steps), but _strip_nans returns dynamic-sized array?
-    # _strip_nans uses masking, so the shape is dynamic in eager mode or boolean-indexed.
-    # We can check size.
-    
-    def _handle_empty():
-        return jnp.array([t0]), jnp.expand_dims(y0, 0)
-
-    def _handle_ok():
-        return ts, ys
-
-    # If ts has size 0, use fallback.
-    # Note: jnp.array(t0) is scalar, we need 1D array.
-    
-    # Use jax.lax.cond for JIT compatibility if needed, but here we are likely just using python control flow 
-    # if _strip_nans returns concrete arrays in eager mode.
-    # However, to be safe with JIT:
-    # ts.size is a tracer in JIT.
-    
-    has_steps = (ts.shape[0] > 0)
-    
-    # We can't easily conditionally return different shaped arrays in JIT if they weren't dynamic.
-    # But _strip_nans already produces dynamic shapes (via boolean indexing).
-    # Actually, boolean indexing in JIT returns a known shape if using `size`? 
-    # No, boolean indexing returns Bounded arrays in JAX if used carefully, 
-    # but normally `ts[mask]` is problematic in JIT unless using `jax.numpy.compress` or similar which pads?
-    # `_strip_nans` implementation:
-    #     mask = jnp.isfinite(ts)
-    #     if isinstance(mask, jax.core.Tracer): return ts, ys 
-    # It returns FULL arrays if traced!
-    # So if traced, `ts` is full length (with NaNs).
-    # If not traced (eager), `ts` is stripped.
-    
-    # If traced, we rely on the caller to handle NaNs? 
-    # But `simulate_ascent` concatenates them.
-    # `ts_a` etc.
-    
-    if isinstance(ts, jax.core.Tracer):
-        # In JIT, we didn't strip NaNs. So we have full arrays.
-        # We assume sol.ts[0] is t0 (due to SaveAt(t0=True)).
-        # If SaveAt(t0=True) is used, index 0 is always finite (t0).
-        # So we don't need to do anything special?
-        pass
-    else:
-        # Eager mode: ts is stripped.
+    if not isinstance(ts, jax.core.Tracer):
         if ts.size == 0:
             ts = jnp.array([t0])
             ys = jnp.expand_dims(y0, 0)
             
-    return ts, ys, sol.result
+    return ts, ys, sol.result, sol.event_mask
+
+
+def _solve_segment_final(*, term: diffrax.ODETerm, solver: diffrax.AbstractSolver, t0: float, t1: float, dt0: float, y0: Array, args, event: diffrax.Event | None, rtol: float, atol: float, max_steps: int):
+    saveat = diffrax.SaveAt(t1=True)
+    stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol)
+
+    sol = diffrax.diffeqsolve(
+        term,
+        solver,
+        t0=t0,
+        t1=t1,
+        dt0=dt0,
+        y0=y0,
+        args=args,
+        saveat=saveat,
+        stepsize_controller=stepsize_controller,
+        event=event,
+        max_steps=max_steps,
+        throw=False,
+    )
+
+    # With SaveAt(t1=True), sol.ts/sol.ys have length 1.
+    t_end = sol.ts[0]
+    y_end = sol.ys[0]
+    return t_end, y_end, sol.result, sol.event_mask
 
 
 def _get_last_state(ts: Array, ys: Array) -> Array:
-    """Get the last valid state from a potentially padded trajectory segment."""
-    # check for tracer
     is_traced = isinstance(ts, jax.core.Tracer)
     if is_traced:
         mask = jnp.isfinite(ts)
-        # Fill non-finite indices with -1 so they are not selected by max
         idxs = jnp.where(mask, jnp.arange(ts.shape[0]), -1)
         last_idx = jnp.max(idxs)
         return ys[last_idx]
     else:
-        # In eager mode, we assume _solve_segment handled empty cases or returned stripped arrays
         if ts.size == 0:
-            # Fallback if somehow empty (should be handled by _solve_segment)
             return ys[0] # dangerous but unlikely if _solve_segment is correct
         return ys[-1]
 
 
-# TEMPORARY: JIT disabled to fix payload mass bug
-# @jax.jit causes caching that ignores payload_mass value changes
-# TODO: Re-enable with proper static_argnums after fixing
+def _get_last_time(ts: Array) -> Array:
+    is_traced = isinstance(ts, jax.core.Tracer)
+    if is_traced:
+        last_idx = _last_finite_index(ts)
+        return ts[last_idx]
+    else:
+        if ts.size == 0:
+            return jnp.array(0.0)
+        return ts[-1]
+
 def simulate_ascent(config: AscentConfig) -> Trajectory:
     earth = config.earth
     vehicle = config.vehicle
@@ -174,23 +211,18 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
 
     m1_end = vehicle.m0 - m1_prop
 
-    y0 = jnp.array([earth.r_e, 0.0, 0.0, jnp.pi / 2.0, vehicle.m0])
+    y0 = jnp.array([earth.r_e + 1.0, 0.0, 0.0, jnp.pi / 2.0, vehicle.m0])
 
     solver = diffrax.Tsit5()
     root_finder = optx.Newton(rtol=numerics.root_rtol, atol=numerics.root_atol, norm=optx.rms_norm)
 
-    def cond_pitch_over(t, y, args, **kwargs):
-        earth_, _stage, _atmos, _v_eps, h_po = args
-        return (y[_R] - earth_.r_e) - h_po
+    event_pitch_over = diffrax.Event((_cond_pitch_over, _cond_ground), root_finder=root_finder)
 
-    event_pitch_over = diffrax.Event(cond_pitch_over, root_finder=None)
+    term_vertical = diffrax.ODETerm(_term_rhs_vertical)
+    h_pitch_over = max(float(numerics.h_pitch_over), 2000.0)
+    args_vertical = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), h_pitch_over)
 
-    term_vertical = diffrax.ODETerm(
-        lambda t, y, args: rhs_vertical(t=t, y=y, earth=args[0], stage=args[1], atmos=args[2], v_eps=args[3])
-    )
-    args_vertical = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), numerics.h_pitch_over)
-
-    ts_a, ys_a, result_a = _solve_segment(
+    ts_a, ys_a, result_a, event_mask_a = _solve_segment(
         term=term_vertical,
         solver=solver,
         t0=0.0,
@@ -209,19 +241,15 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         name="Pitch-over",
         hint="Increase numerics.t_max, adjust numerics.h_pitch_over, or check that the vehicle accelerates upward (T > weight).",
     )
+    if _event_mask_is(event_mask_a, 1):
+        raise RuntimeError("Pitch-over terminated by ground impact; check initial conditions / thrust-to-weight.")
 
     y_po = _get_last_state(ts_a, ys_a)
     y_po = y_po.at[_GAMMA].set(jnp.pi / 2.0 - numerics.theta0)
 
-    def cond_stage1_burnout(t, y, args, **kwargs):
-        _earth, _stage, _atmos, _v_eps, m1_end_ = args
-        return y[_M] - m1_end_
+    event_s1 = diffrax.Event((_cond_stage1_burnout, _cond_ground), root_finder=root_finder)
 
-    event_s1 = diffrax.Event(cond_stage1_burnout, root_finder=None)
-
-    term_s1 = diffrax.ODETerm(
-        lambda t, y, args: rhs_gravity_turn(t=t, y=y, earth=args[0], stage=args[1], atmos=args[2], v_eps=args[3])
-    )
+    term_s1 = diffrax.ODETerm(_term_rhs_gravity_turn)
     args_s1 = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), m1_end)
 
     # Note: we use _get_last_state to find start time for next segment too?
@@ -229,16 +257,10 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     # But wait, t0_b needs to be the end time of A.
     # ts_a[-1] is NaN in JIT!
     
-    t0_b = _get_last_state(ts_a, ts_a.reshape(-1, 1))[0] # Hacky reuse of _get_last_state for scalar?
-    # Let's clean up _get_last_state to handle 1D arrays or make a specific one for time.
-    # Actually, let's just make _get_last_state handle 1D arrays properly.
-    
-    # Redefine logic inside simulate_ascent for clarity or helper.
-    # Let's stick to the helper pattern but assume ys can be 1D or 2D.
-    
-    t1_b = jnp.maximum(numerics.t_max, t0_b + 1.0)
+    t0_b = _get_last_time(ts_a)
+    t1_b = numerics.t_max
 
-    ts_b, ys_b, result_b = _solve_segment(
+    ts_b, ys_b, result_b, event_mask_b = _solve_segment(
         term=term_s1,
         solver=solver,
         t0=t0_b,
@@ -264,25 +286,26 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         g0=g0_b,
         g1=g1_b,
     )
+    if _event_mask_is(event_mask_b, 1):
+        raise RuntimeError("Stage 1 segment terminated by ground impact; check guidance/parameters.")
 
     # Apply separation: remove stage 1 dry mass
     y_sep = y_b_end.at[_M].set(y_b_end[_M] - vehicle.m1_dry)
 
     # Coast Phase (New Phase C)
     # -------------------------
-    t0_coast = _get_last_state(ts_b, ts_b.reshape(-1, 1))[0]
+    t0_coast = _get_last_time(ts_b)
     t1_coast = t0_coast + numerics.t_coast
 
     # We reuse rhs_coast (already defined but unused)
     # Coasting is usually just gravity + drag, thrust=0, dm/dt=0
-    term_coast = diffrax.ODETerm(
-        lambda t, y, args: rhs_coast(t=t, y=y, earth=args[0], stage=args[1], atmos=args[2], v_eps=args[3])
-    )
+    term_coast = diffrax.ODETerm(_term_rhs_coast)
     # Use stage2 params for area/drag during coast (or stage1? usually stage 2 acts as the body now)
     # The 'rhs_coast' sets thrust=0 internally.
     args_coast = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps))
 
-    ts_coast, ys_coast, result_coast = _solve_segment(
+    event_coast = diffrax.Event(_cond_ground, root_finder=root_finder)
+    ts_coast, ys_coast, result_coast, event_mask_coast = _solve_segment(
         term=term_coast,
         solver=solver,
         t0=t0_coast,
@@ -290,7 +313,7 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         dt0=numerics.dt0,
         y0=y_sep,
         args=args_coast,
-        event=None, # Coast is fixed time, not event driven (unless we crash)
+        event=event_coast,
         rtol=numerics.rtol,
         atol=numerics.atol,
         max_steps=numerics.max_steps,
@@ -301,29 +324,21 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     # Stage 2 Burn (Phase D)
     # ----------------------
     # Control variable is now t_burn2 (duration), not m_cut
-    t0_d = _get_last_state(ts_coast, ts_coast.reshape(-1, 1))[0]
+    if result_coast == diffrax.RESULTS.event_occurred:
+        raise RuntimeError("Coast terminated by ground impact; check guidance/parameters.")
+
+    t0_d = _get_last_time(ts_coast)
     t1_d = t0_d + numerics.t_burn2
 
-    # CRITICAL FIX: Add fuel depletion event to stop when m = m2_dry + payload
     mission = config.mission
     m_min_s2 = vehicle.m2_dry + mission.payload_mass
-    
-    # Create event condition that captures m_min_s2 in closure
-    def cond_fuel_depletion(t, y, args, **kwargs):
-        """Event triggers when mass reaches minimum (m2_dry + payload).
-        Returns positive when m > m_min, zero at m = m_min, negative when m < m_min.
-        Event triggers on zero crossing (when mass reaches minimum).
-        """
-        return y[_M] - m_min_s2  # Use closure variable
-    
-    event_fuel = diffrax.Event(cond_fuel_depletion, root_finder=root_finder)
-    
-    term_s2 = diffrax.ODETerm(
-        lambda t, y, args: rhs_gravity_turn(t=t, y=y, earth=args[0], stage=args[1], atmos=args[2], v_eps=args[3])
-    )
-    args_s2 = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps))
 
-    ts_d, ys_d, result_d = _solve_segment(
+    event_fuel = diffrax.Event((_cond_fuel_depletion, _cond_ground), root_finder=root_finder)
+    
+    term_s2 = diffrax.ODETerm(_term_rhs_stage2_steer)
+    args_s2 = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps), m_min_s2, jnp.array(numerics.alpha2))
+
+    ts_d, ys_d, result_d, event_mask_d = _solve_segment(
         term=term_s2,
         solver=solver,
         t0=t0_d,
@@ -336,6 +351,9 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         atol=numerics.atol,
         max_steps=numerics.max_steps,
     )
+
+    if result_d == diffrax.RESULTS.event_occurred and _event_mask_is(event_mask_d, 1):
+        raise RuntimeError("Stage 2 terminated by ground impact; check guidance/parameters.")
     
     # Check if we ran out of fuel during the fixed burn time?
     # Ideally, the optimizer finds a t_burn2 < max_burn_time.
@@ -407,3 +425,111 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         drag=drag,
         orbit=orbit,
     )
+
+
+def simulate_ascent_final(config: AscentConfig) -> tuple[Array, Array]:
+    earth = config.earth
+    vehicle = config.vehicle
+    numerics = config.numerics
+
+    atmos = build_atmosphere_table(z_max_m=config.atmosphere_z_max, dz_m=config.atmosphere_dz)
+
+    m1_prop = vehicle.stage1.thrust * vehicle.t1_burn / (vehicle.stage1.isp * earth.g0)
+    m1_end = vehicle.m0 - m1_prop
+
+    y0 = jnp.array([earth.r_e + 1.0, 0.0, 0.0, jnp.pi / 2.0, vehicle.m0])
+
+    solver = diffrax.Tsit5()
+    root_finder = optx.Newton(rtol=numerics.root_rtol, atol=numerics.root_atol, norm=optx.rms_norm)
+
+    term_vertical = diffrax.ODETerm(_term_rhs_vertical)
+    h_pitch_over = max(float(numerics.h_pitch_over), 2000.0)
+    args_vertical = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), h_pitch_over)
+    event_pitch_over = diffrax.Event((_cond_pitch_over, _cond_ground), root_finder=root_finder)
+
+    t_a, y_a, result_a, event_mask_a = _solve_segment_final(
+        term=term_vertical,
+        solver=solver,
+        t0=0.0,
+        t1=numerics.t_max,
+        dt0=numerics.dt0,
+        y0=y0,
+        args=args_vertical,
+        event=event_pitch_over,
+        rtol=numerics.rtol,
+        atol=numerics.atol,
+        max_steps=numerics.max_steps,
+    )
+    if result_a != diffrax.RESULTS.event_occurred or _event_mask_is(event_mask_a, 1):
+        raise RuntimeError("Vertical phase failed (pitch-over not reached or ground impact).")
+
+    y_po = y_a.at[_GAMMA].set(jnp.pi / 2.0 - numerics.theta0)
+
+    term_s1 = diffrax.ODETerm(_term_rhs_gravity_turn)
+    args_s1 = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), m1_end)
+    event_s1 = diffrax.Event((_cond_stage1_burnout, _cond_ground), root_finder=root_finder)
+
+    t_b, y_b, result_b, event_mask_b = _solve_segment_final(
+        term=term_s1,
+        solver=solver,
+        t0=t_a,
+        t1=numerics.t_max,
+        dt0=numerics.dt0,
+        y0=y_po,
+        args=args_s1,
+        event=event_s1,
+        rtol=numerics.rtol,
+        atol=numerics.atol,
+        max_steps=numerics.max_steps,
+    )
+    if result_b != diffrax.RESULTS.event_occurred or _event_mask_is(event_mask_b, 1):
+        raise RuntimeError("Stage 1 failed (burnout not reached or ground impact).")
+
+    y_sep = y_b.at[_M].set(y_b[_M] - vehicle.m1_dry)
+
+    # Coast
+    term_coast = diffrax.ODETerm(_term_rhs_coast)
+    args_coast = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps))
+    event_ground = diffrax.Event(_cond_ground, root_finder=root_finder)
+
+    t_c, y_c, result_c, _event_mask_c = _solve_segment_final(
+        term=term_coast,
+        solver=solver,
+        t0=t_b,
+        t1=t_b + numerics.t_coast,
+        dt0=numerics.dt0,
+        y0=y_sep,
+        args=args_coast,
+        event=event_ground,
+        rtol=numerics.rtol,
+        atol=numerics.atol,
+        max_steps=numerics.max_steps,
+    )
+    if result_c == diffrax.RESULTS.event_occurred:
+        raise RuntimeError("Coast failed (ground impact).")
+
+    # Stage 2 burn
+    mission = config.mission
+    m_min_s2 = vehicle.m2_dry + mission.payload_mass
+
+    term_s2 = diffrax.ODETerm(_term_rhs_stage2_steer)
+    args_s2 = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps), m_min_s2, jnp.array(numerics.alpha2))
+    event_s2 = diffrax.Event((_cond_fuel_depletion, _cond_ground), root_finder=root_finder)
+
+    t_d, y_d, result_d, event_mask_d = _solve_segment_final(
+        term=term_s2,
+        solver=solver,
+        t0=t_c,
+        t1=t_c + numerics.t_burn2,
+        dt0=numerics.dt0,
+        y0=y_c,
+        args=args_s2,
+        event=event_s2,
+        rtol=numerics.rtol,
+        atol=numerics.atol,
+        max_steps=numerics.max_steps,
+    )
+    if result_d == diffrax.RESULTS.event_occurred and _event_mask_is(event_mask_d, 1):
+        raise RuntimeError("Stage 2 failed (ground impact).")
+
+    return t_d, y_d

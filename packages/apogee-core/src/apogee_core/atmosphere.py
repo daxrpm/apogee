@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import jax
 import jax.numpy as jnp
@@ -30,7 +31,7 @@ class AtmosphereTable:
 
     def rho_at(self, h_m: Array) -> Array:
         # FIX 3: Hold last table value above z_max for C0-continuous extrapolation.
-        return jnp.interp(h_m, self.z_m, self.rho, left=self.rho[0], right=self.rho[-1])
+        return jnp.interp(h_m, self.z_m, self.rho, left=self.rho[0], right=0.0)
 
     def cs_at(self, h_m: Array) -> Array:
         # FIX 3: Hold last table value above z_max for C0-continuous extrapolation.
@@ -38,6 +39,13 @@ class AtmosphereTable:
 
 
 def build_atmosphere_table(*, z_max_m: float, dz_m: float) -> AtmosphereTable:
+    z_max_m = float(z_max_m)
+    dz_m = float(dz_m)
+    return _build_atmosphere_table_cached(z_max_m=z_max_m, dz_m=dz_m)
+
+
+@lru_cache(maxsize=8)
+def _build_atmosphere_table_cached(*, z_max_m: float, dz_m: float) -> AtmosphereTable:
     if z_max_m <= 0.0:
         raise ValueError("z_max_m must be positive")
     if dz_m <= 0.0:
