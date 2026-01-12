@@ -6,442 +6,288 @@
 \usepackage{hyperref}
 \hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
 \usepackage{booktabs}
+\usepackage{listings}
+\usepackage{color}
+\usepackage{float}
+\usepackage{graphicx}
 
-\title{APOGEE: Planar Two-Stage Ascent to Circular LEO \\ (Mathematical Formulation and Numerical Methods; Code-Consistent)}
-\author{}
-\date{}
+\title{Apogee: Planar Two-Stage Ascent to Circular LEO \\ \large Mathematical Formulation, Numerical Methods, and Implementation Report}
+\author{Apogee Development Team}
+\date{\today}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-This report derives, from first principles, the exact mathematical model and numerical methods implemented in the current APOGEE codebase (\texttt{packages/apogee-core/src/apogee\_core}). The simulator propagates a planar (2D) Earth-centered ascent with variable mass, non-constant gravity, US Standard Atmosphere 1976 (USSA76) density and speed of sound, and aerodynamic drag. Flight is modeled as a hybrid dynamical system with event-driven phase changes (pitch-over, stage-1 burnout and separation, coast, stage-2 burn termination by time or fuel depletion, and ground impact).
-
-The circular-orbit insertion problem is solved via a shooting method that adjusts a four-dimensional control vector $\bm u=(\theta_0, t_{\mathrm{coast}}, t_{\mathrm{burn2}}, \alpha_2)$ and drives a three-component residual based on terminal osculating orbital elements: $\bm F(\bm u)=[(a-r_{\mathrm{target}})/r_{\mathrm{target}},\ e,\ \gamma]^T$. The nonlinear solve is performed with a Levenberg--Marquardt-type iteration using a finite-difference Jacobian in an unconstrained variable $\bm x\in\mathbb{R}^4$ (logistic re-parameterization to enforce bounds), a Broyden rank-1 update, and a backtracking line search.
-
-Every equation and every numerical method is explicitly mapped to the corresponding implementation function and file, to avoid ambiguity.
+This report details the mathematical models and numerical algorithms governing the \textbf{Apogee} space mission simulator. The system models the ascent of a two-stage liquid-propellant rocket into a circular Low Earth Orbit (LEO) considering variable mass, non-constant gravity, and atmospheric drag based on the US Standard Atmosphere 1976 (USSA76). The flight is modeled as a hybrid dynamical system with discrete event-driven phase transitions. The trajectory optimization problem is solved using a custom implementation of a Levenberg-Marquardt algorithm with Broyden rank-1 updates. This document serves as the authoritative reference for the codebase; all equations are numbered and explicitly mapped to their software implementations.
 \end{abstract}
 
-\section{Problem statement}
-\subsection{Mission inputs}
-The simulator mission is parameterized by:
+\tableofcontents
+\newpage
+
+\section{Project Structure and Architecture}
+
+The \texttt{Apogee} project is organized as a monorepo using \texttt{uv} workspaces to ensure modularity and clean separation of concerns.
+
+\begin{description}
+    \item[\texttt{packages/apogee-physics}] The core numerical engine.
+    \begin{itemize}
+        \item \texttt{dynamics.py}: Contains the Equations of Motion (EOM) derived in Section \ref{sec:eom}.
+        \item \texttt{atmosphere.py}: Implements the USSA76 atmospheric model (Section \ref{sec:atmosphere}).
+        \item \texttt{simulate.py}: Manages the hybrid system integration and event handling (Section \ref{sec:hybrid}).
+        \item \texttt{shooting.py}: Implements the optimization algorithms (Section \ref{sec:optimization}).
+        \item \texttt{orbit.py}: Calculates Keplerian orbital elements (Section \ref{sec:orbit}).
+    \end{itemize}
+    \item[\texttt{packages/apogee-launch}] The simulation runner and CLI tools.
+    \item[\texttt{packages/apogee-api}] A FastAPI backend for serving simulation results.
+    \item[\texttt{packages/apogee-orbit}] Future module for long-term orbit propagation and perturbations.
+\end{description}
+
+\section{Coordinate System and State Vector}
+
+We define the motion in a 2D inertial plane centered at the Earth. We assume a non-rotating Earth for the ascent phase purely to simplify the equations to a planar model, although the physics engine is extensible.
+
+The state vector $\bm{y}(t)$ consists of 5 variables:
+\begin{equation}
+    \label{eq:state_vector}
+    \bm{y}(t) = \begin{bmatrix} r(t) \\ \lambda(t) \\ v(t) \\ \gamma(t) \\ m(t) \end{bmatrix}
+\end{equation}
+Where:
 \begin{itemize}
-\item Target circular orbit altitude $h_{\mathrm{target}}$ (m).
-\item Payload mass $m_{\mathrm{PL}}$ (kg).
-\end{itemize}
-Define
-\begin{equation}
- r_{\mathrm{target}} = R_E + h_{\mathrm{target}},
-\end{equation}
-where $R_E$ is the Earth reference radius.
-
-\subsection{Assumptions}
-\begin{itemize}
-\item Planar (2D) inertial motion; Earth rotation and out-of-plane dynamics are neglected.
-\item Central gravity with parameter $\mu$.
-\item Two powered stages with constant thrust $T$ and constant specific impulse $I_{sp}$ per stage.
-\item Aerodynamic drag with $\rho(h)$ and $a_s(h)$ from USSA76.
-\item Hybrid events define phase transitions.
+    \item $r(t)$: Geocentric radius (distance from Earth center) [m].
+    \item $\lambda(t)$: Downrange central angle [rad].
+    \item $v(t)$: Velocity magnitude (speed) [m/s].
+    \item $\gamma(t)$: Flight-path angle (FPA), measured from the local horizontal [rad]. $\gamma > 0$ implies ascent.
+    \item $m(t)$: Vehicle total mass [kg].
 \end{itemize}
 
-\section{State, geometry, and kinematics}
-\subsection{State variables}
-We define (planar polar coordinates in an inertial plane):
-\begin{itemize}
-\item $r(t)$: geocentric radius.
-\item $\lambda(t)$: downrange central angle (rad).
-\item $v(t)$: speed magnitude.
-\item $\gamma(t)$: flight-path angle (FPA), measured from local horizontal.
-\item $m(t)$: vehicle mass.
-\end{itemize}
-Altitude is
-\begin{equation}
- h(t)=r(t)-R_E.
-\end{equation}
-The state vector is
-\begin{equation}
- \boxed{\bm y(t)=\begin{bmatrix} r(t)\\ \lambda(t)\\ v(t)\\ \gamma(t)\\ m(t) \end{bmatrix}.}
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/dynamics.py} (indexing constants \texttt{\_R,\_LAM,\_V,\_GAMMA,\_M}).
+\section{Equations of Motion (EOM)}
+\label{sec:eom}
 
-\subsection{Velocity decomposition}
-In planar polar coordinates,
+\subsection{Kinematics}
+From the definition of polar coordinates, the velocity vector $\bm{v}$ can be decomposed into radial ($\hat{e}_r$) and tangential ($\hat{e}_\lambda$) components:
 \begin{equation}
- \bm v = \dot r\,\hat{\bm e}_r + r\dot\lambda\,\hat{\bm e}_{\lambda}.
+    \bm{v} = v \sin\gamma \, \hat{e}_r + v \cos\gamma \, \hat{e}_\lambda
 \end{equation}
-Define $\gamma$ such that
+This yields the kinematic differential equations:
 \begin{equation}
- \dot r = v\sin\gamma,\qquad r\dot\lambda = v\cos\gamma.
+    \label{eq:dr}
+    \frac{dr}{dt} = v \sin\gamma
 \end{equation}
-Therefore the kinematic ODEs are
 \begin{equation}
- \boxed{\dot r = v\sin\gamma},\qquad
- \boxed{\dot\lambda = \frac{v\cos\gamma}{r}}.
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/dynamics.py::rhs\_general}.
-
-\section{Environment model (USSA76)}
-\subsection{Tabulation}
-USSA76 provides density $\rho$ and speed of sound $a_s$ as functions of geometric altitude $h$. The code builds a discrete table
-\begin{equation}
- z_i = i\,\Delta z,\qquad i=0,\dots,N,\qquad z_N\approx z_{\max},
-\end{equation}
-and evaluates
-\begin{equation}
- \rho_i = \rho(z_i),\qquad a_{s,i} = a_s(z_i).
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/atmosphere.py::build\_atmosphere\_table} (cached with LRU).
-
-\subsection{Interpolation and physically safe extrapolation}
-During integration, the model uses linear interpolation
-\begin{equation}
- \rho(h) = \mathrm{interp}(h;\{(z_i,\rho_i)\}),\qquad a_s(h)=\mathrm{interp}(h;\{(z_i,a_{s,i})\}).
-\end{equation}
-To avoid non-physical extrapolation above $z_{\max}$, the table is extended with one additional point
-\begin{equation}
- z_{N+1} = z_N + \Delta z,\qquad \rho_{N+1}=0,\qquad a_{s,N+1}=a_{s,N},
-\end{equation}
-so that the interpolator has a C$^0$-continuous approach to vacuum.
-\textbf{Code:} \texttt{apogee\_core/atmosphere.py::\_build\_atmosphere\_table\_cached}.
-
-\section{Aerodynamic model}
-Define Mach number
-\begin{equation}
- M = \frac{v}{a_s(h)}.
-\end{equation}
-Given a drag coefficient model $C_D(M)$ and reference area $A_{\mathrm{ref}}$, drag magnitude is
-\begin{equation}
- \boxed{D = \tfrac12\,\rho(h)\,C_D(M)\,A_{\mathrm{ref}}\,v^2.}
-\end{equation}
-Dynamic pressure is
-\begin{equation}
- \boxed{q = \tfrac12\,\rho(h)\,v^2.}
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/dynamics.py::compute\_derived}.
-
-\section{Propulsion and variable mass}
-Specific impulse is defined by
-\begin{equation}
- I_{sp} = \frac{T}{\dot m_{\mathrm{prop}} g_0}.
-\end{equation}
-With $\dot m=-\dot m_{\mathrm{prop}}$, mass flow is
-\begin{equation}
- \boxed{\dot m = -\frac{T}{I_{sp} g_0}.}
-\end{equation}
-Coast is implemented by setting $T=0$ and forcing $\dot m=0$.
-\textbf{Code:} \texttt{apogee\_core/dynamics.py::rhs\_general}, \texttt{rhs\_coast}.
-
-\section{Dynamics: derivation of the implemented ODE}
-\subsection{Force model and thrust direction}
-Gravity acceleration is central:
-\begin{equation}
- \bm a_g = -\frac{\mu}{r^2}\hat{\bm e}_r.
-\end{equation}
-Let $\hat{\bm t}$ be the unit tangent along velocity and $\hat{\bm n}$ the in-plane normal:
-\begin{equation}
- \hat{\bm t}=\sin\gamma\,\hat{\bm e}_r+\cos\gamma\,\hat{\bm e}_{\lambda},\qquad
- \hat{\bm n}=\cos\gamma\,\hat{\bm e}_r-\sin\gamma\,\hat{\bm e}_{\lambda}.
-\end{equation}
-Let $\alpha$ be the steering angle between thrust and velocity (in-plane). Then
-\begin{equation}
- \hat{\bm u}_T = \cos\alpha\,\hat{\bm t} + \sin\alpha\,\hat{\bm n},
-\qquad \bm a_T = \frac{T}{m}\hat{\bm u}_T.
-\end{equation}
-Drag acceleration is opposite velocity:
-\begin{equation}
- \bm a_D = -\frac{D}{m}\hat{\bm t}.
+    \label{eq:dlam}
+    \frac{d\lambda}{dt} = \frac{v \cos\gamma}{r}
 \end{equation}
 
-\subsection{Speed equation}
-By definition $\dot v = \bm a\cdot \hat{\bm t}$, where $\bm a=\bm a_T+\bm a_D+\bm a_g$. Using
-\begin{equation}
- \bm a_T\cdot\hat{\bm t}=\frac{T}{m}\cos\alpha,\qquad \bm a_D\cdot\hat{\bm t}=-\frac{D}{m},\qquad \bm a_g\cdot\hat{\bm t}=-\frac{\mu}{r^2}\sin\gamma,
-\end{equation}
-we obtain
-\begin{equation}
- \boxed{\dot v = \frac{T}{m}\cos\alpha - \frac{D}{m} - \frac{\mu}{r^2}\sin\gamma.}
-\end{equation}
+\subsection{Forces}
+The vehicle is subject to three primary forces:
+\begin{enumerate}
+    \item \textbf{Thrust ($T$)}: Acts along the vehicle's longitudinal axis. The steering angle $\alpha$ is defined as the angle between the thrust vector and the velocity vector.
+    \item \textbf{Drag ($D$)}: Acts opposite to the velocity vector.
+    \item \textbf{Gravity ($g$)}: Acts towards the center of the Earth.
+\end{enumerate}
 
-\subsection{Flight-path angle equation}
-A standard planar identity gives
-\begin{equation}
- \bm a\cdot\hat{\bm n} = v\dot\gamma - \frac{v^2}{r}\cos\gamma.
-\end{equation}
-Compute
-\begin{equation}
- \bm a_T\cdot\hat{\bm n}=\frac{T}{m}\sin\alpha,\qquad \bm a_D\cdot\hat{\bm n}=0,\qquad \bm a_g\cdot\hat{\bm n}=-\frac{\mu}{r^2}\cos\gamma.
-\end{equation}
-Thus
-\begin{equation}
- \frac{T}{m}\sin\alpha - \frac{\mu}{r^2}\cos\gamma = v\dot\gamma - \frac{v^2}{r}\cos\gamma,
-\end{equation}
-and
-\begin{equation}
- \boxed{\dot\gamma = \frac{T}{mv}\sin\alpha + \left(\frac{v}{r} - \frac{\mu}{r^2 v}\right)\cos\gamma.}
-\end{equation}
-
-\subsection{Complete ODE system (code-consistent)}
-Combining kinematics, dynamics, and mass flow:
+\subsection{Dynamics Derivation}
+Newton's Second Law in the path coordinate system (tangent $\hat{t}$ and normal $\hat{n}$ to the trajectory) states:
 \begin{align}
- \dot r &= v\sin\gamma,\\
- \dot\lambda &= \frac{v\cos\gamma}{r},\\
- \dot v &= \frac{T}{m}\cos\alpha - \frac{D}{m} - \frac{\mu}{r^2}\sin\gamma,\\
- \dot\gamma &= \frac{T}{mv}\sin\alpha + \left(\frac{v}{r} - \frac{\mu}{r^2 v}\right)\cos\gamma,\\
- \dot m &= -\frac{T}{I_{sp} g_0}.
+    \sum F_t &= m \frac{dv}{dt} \\
+    \sum F_n &= m v \frac{d\gamma}{dt} - m \frac{v^2}{r} \cos\gamma \quad \text{(includes centrifugal term)}
 \end{align}
-\textbf{Code:} \texttt{apogee\_core/dynamics.py::rhs\_general}.
 
-\section{Numerical regularizations implemented in the RHS}
-Two numerical guard terms are implemented to avoid singularities and unstable divisions.
-
-\subsection{Guard for $1/v$}
-The $\dot\gamma$ equation contains $1/v$. Near lift-off $v\to 0$, this is numerically singular. The implementation replaces
-\begin{equation}
- \frac{1}{v} \;\leadsto\; \frac{v}{v^2 + v_{\varepsilon}^2},
-\end{equation}
-which matches $1/v$ for $v\gg v_{\varepsilon}$ and remains bounded at $v=0$.
-\textbf{Code:} \texttt{apogee\_core/dynamics.py::rhs\_general} (variable \texttt{inv\_v}).
-
-\subsection{Guard for $1/r$}
-The kinematic and dynamic terms include $1/r$ and $1/r^2$. To avoid numerical collapse if $r$ becomes non-physical, the code uses
-\begin{equation}
- r_{\mathrm{safe}} = \max(r, 0.99R_E)
-\end{equation}
-in denominator terms.
-\textbf{Code:} \texttt{apogee\_core/dynamics.py::rhs\_general} (variable \texttt{r\_safe}).
-
-\section{Hybrid flight phases and event conditions}
-The full ascent is a hybrid system assembled from multiple ODE segments.
-
-\subsection{Phase A: vertical ascent}
-To avoid the $1/v$ issue at ignition, the vertical phase enforces
-\begin{equation}
- \gamma=\frac{\pi}{2},\qquad \dot\gamma=0.
-\end{equation}
-The pitch-over event triggers when altitude reaches $h_{\mathrm{po}}$:
-\begin{equation}
- g_{\mathrm{po}}(\bm y) = (r-R_E) - h_{\mathrm{po}} = 0.
-\end{equation}
-After the event, an instantaneous reset sets
-\begin{equation}
- \gamma^+ = \frac{\pi}{2} - \theta_0.
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/simulate.py::\_cond\_pitch\_over} and \texttt{simulate\_ascent}.
-
-\subsection{Phase B: stage-1 powered gravity turn}
-During stage 1, thrust is aligned with velocity:
-\begin{equation}
- \alpha=0.
-\end{equation}
-Stage-1 burnout is modeled by a mass event. First compute propellant consumed during stage 1
-\begin{equation}
- m_{1,\mathrm{prop}} = \frac{T_1\,t_{1,\mathrm{burn}}}{I_{sp,1} g_0},
-\end{equation}
-and define end-of-burn mass
-\begin{equation}
- m_{1,\mathrm{end}} = m_0 - m_{1,\mathrm{prop}}.
-\end{equation}
-The burnout event is
-\begin{equation}
- g_{\mathrm{s1}}(\bm y)=m-m_{1,\mathrm{end}}=0.
-\end{equation}
-Upon separation, a dry-mass drop is applied:
-\begin{equation}
- m^+ = m^- - m_{1,\mathrm{dry}}.
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/simulate.py::\_cond\_stage1\_burnout} and separation logic in \texttt{simulate\_ascent}.
-
-\subsection{Phase C: coast}
-Coast integrates the same ODE with $T=0$ and enforces $\dot m=0$.
-\textbf{Code:} \texttt{apogee\_core/dynamics.py::rhs\_coast} and \texttt{simulate\_ascent}.
-
-\subsection{Phase D: stage-2 burn with constant steering}
-Stage 2 uses a constant steering angle
-\begin{equation}
- \alpha = \alpha_2.
-\end{equation}
-The integration stops at either
+Resolving forces:
 \begin{itemize}
-\item fixed burn duration $t_{\mathrm{burn2}}$, or
-\item fuel depletion event at $m=m_{\min}$.
+    \item \textbf{Tangential}: Thrust component $T \cos\alpha$, Drag $-D$, Gravity component $-mg \sin\gamma$.
+    \item \textbf{Normal}: Thrust component $T \sin\alpha$, Gravity component $-mg \cos\gamma$.
 \end{itemize}
-The physical minimum mass is
-\begin{equation}
- m_{\min} = m_{2,\mathrm{dry}} + m_{\mathrm{PL}},
-\end{equation}
-and the event is
-\begin{equation}
- g_{\mathrm{fuel}}(\bm y) = m - m_{\min} = 0.
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/simulate.py::\_cond\_fuel\_depletion} and stage-2 RHS term \texttt{\_term\_rhs\_stage2\_steer}.
 
-\subsection{Ground impact}
-Ground impact is detected by
-\begin{equation}
- g_{\mathrm{ground}}(\bm y)=r-R_E=0.
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/simulate.py::\_cond\_ground}.
+Substituting $g = \mu / r^2$, we obtain the dynamic equations:
 
-\section{ODE solver and event root-finding (numerical methods)}
-Each segment is integrated with:
+\textbf{Speed Equation:}
+\begin{equation}
+    \label{eq:dv}
+    \frac{dv}{dt} = \frac{T}{m} \cos\alpha - \frac{D}{m} - \frac{\mu}{r^2} \sin\gamma
+\end{equation}
+
+\textbf{Flight-Path Angle Equation:}
+\begin{equation}
+    \label{eq:dgamma}
+    \frac{d\gamma}{dt} = \frac{T}{m v} \sin\alpha + \left( \frac{v}{r} - \frac{\mu}{r^2 v} \right) \cos\gamma
+\end{equation}
+
+\subsection{Mass Flow}
+The mass depletion is governed by the rocket equation:
+\begin{equation}
+    \label{eq:dm}
+    \frac{dm}{dt} = - \frac{T}{I_{sp} g_0}
+\end{equation}
+where $I_{sp}$ is the specific impulse [s] and $g_0$ is standard gravity ($9.80665$ m/s$^2$).
+
+\subsection{Numerical Regularization}
+\label{sec:regularization}
+Equations (\ref{eq:dgamma}) contains terms with $1/v$. At launch ($t=0, v=0$), this causes a singularity. In the code implementation (\texttt{dynamics.py}), we apply a regularization technique.
+
+We introduce a small epsilon velocity $v_\epsilon$. We define a regularized inverse velocity:
+\begin{equation}
+    \label{eq:inv_v_reg}
+    \frac{1}{v}_{\text{reg}} = \frac{v}{v^2 + v_\epsilon^2}
+\end{equation}
+This term behaves like $1/v$ for large $v$, but goes to $0$ as $v \to 0$, preventing numerical explosion.
+
+We also guard against $r \to 0$ (though physically impossible in flight) using:
+\begin{equation}
+    \label{eq:r_safe}
+    r_{\text{safe}} = \max(r, 0.99 R_E)
+\end{equation}
+
+The implemented regularized $\dot{\gamma}$ equation is:
+\begin{equation}
+    \label{eq:dgamma_reg}
+    \frac{d\gamma}{dt} \approx \frac{T \sin\alpha}{m} \left(\frac{1}{v}_{\text{reg}}\right) + \left( \frac{v}{r_{\text{safe}}} - \frac{\mu}{r_{\text{safe}}^2} \left(\frac{1}{v}_{\text{reg}}\right) \right) \cos\gamma
+\end{equation}
+
+\section{Atmosphere and Aerodynamics}
+\label{sec:atmosphere}
+
+\subsection{US Standard Atmosphere 1976}
+We compute air density $\rho(h)$ and speed of sound $a_s(h)$ using the USSA76 model. The implementation builds a lookup table and uses linear interpolation.
+\begin{equation}
+    \label{eq:rho_interp}
+    \rho(h) = \text{Interp}(h, \text{USSA76}_{\rho})
+\end{equation}
+
+\subsection{Aerodynamic Drag}
+The Mach number is $M = v / a_s(h)$. The drag force is:
+\begin{equation}
+    \label{eq:drag}
+    D = \frac{1}{2} \rho v^2 C_D(M) A_{\text{ref}}
+\end{equation}
+where $C_D(M)$ is the drag coefficient (potentially varying with Mach number) and $A_{\text{ref}}$ is the vehicle reference area.
+
+\section{Hybrid System Simulation}
+\label{sec:hybrid}
+
+The flight is modeled as a sequence of phases, each governed by specific constraints or parameters.
+
+\subsection{Phase A: Vertical Ascent}
 \begin{itemize}
-\item \textbf{ODE solver:} Tsitouras 5(4) (\texttt{diffrax.Tsit5}).
-\item \textbf{Adaptive step-size controller:} PID controller (\texttt{diffrax.PIDController(rtol,atol)}).
-\item \textbf{Event root-finding:} Newton method (\texttt{optimistix.Newton(rtol=root\_rtol, atol=root\_atol)}).
-\item \textbf{Saving strategy:} save initial time and every accepted step (\texttt{diffrax.SaveAt(t0=True, steps=True)}).
+    \item \textbf{Constraint}: $\gamma = \pi/2$ (constant).
+    \item \textbf{Dynamics}: $\dot{\gamma} = 0$. $\dot{\lambda} = 0$.
+    \item \textbf{Termination Event}: Altitude reaches $h_{\text{pitchover}}$.
+    \item \textbf{Transition}: Instantaneous change of $\gamma$ to $\pi/2 - \theta_0$.
 \end{itemize}
-\textbf{Code:} \texttt{apogee\_core/simulate.py::\_solve\_segment}.
 
-\section{Trajectory assembly and time monotonicity}
-Segments are concatenated as
-\begin{equation}
- t = [t^{(A)}, t^{(B)}_{2:}, t^{(C)}_{2:}, t^{(D)}_{2:}],
-\end{equation}
-where $2:$ indicates dropping the first sample of each subsequent segment to avoid duplicating boundary points.
-
-Even with this, adaptive solvers and event boundaries can produce consecutive equal times. For physical consistency and frontend consumption, the implementation enforces strict monotonicity
-\begin{equation}
- t_{k+1} > t_k\quad\forall k,
-\end{equation}
-by dropping non-increasing consecutive samples and applying the same mask to all derived series.
-\textbf{Code:} \texttt{apogee\_core/simulate.py::\_strictly\_increasing\_mask} and its application to \texttt{ts,ys,mach,drag,q}.
-
-\section{Two-body orbital diagnostics at cutoff}
-Given a terminal state $(r,v,\gamma)$ and Earth parameter $\mu$, define specific orbital energy
-\begin{equation}
- \varepsilon = \frac{v^2}{2} - \frac{\mu}{r},
-\end{equation}
-and specific angular momentum magnitude (planar)
-\begin{equation}
- h = r v \cos\gamma.
-\end{equation}
-Eccentricity is computed as
-\begin{equation}
- \boxed{e = \sqrt{\max\left\{0,\ 1 + \frac{2\varepsilon h^2}{\mu^2}\right\}}.}
-\end{equation}
-For bound orbits ($\varepsilon<0$), the semi-major axis is
-\begin{equation}
- \boxed{a = -\frac{\mu}{2\varepsilon}.}
-\end{equation}
-Apoapsis and periapsis radii are
-\begin{equation}
- r_a = a(1+e),\qquad r_p=a(1-e).
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/orbit.py::orbit\_diagnostics}.
-
-\section{Shooting formulation (current implementation)}
-\subsection{Decision variables}
-The shooting solver adjusts the control vector
-\begin{equation}
- \boxed{\bm u = \begin{bmatrix}\theta_0\\ t_{\mathrm{coast}}\\ t_{\mathrm{burn2}}\\ \alpha_2\end{bmatrix}.}
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/shooting.py::solve\_circular\_orbit} and \texttt{compute\_residuals}.
-
-\subsection{Map from controls to terminal orbit}
-Given $\bm u$, the code runs a fast terminal-only simulation (same hybrid model) to obtain a terminal state $\bm y_f(\bm u)$.
-\textbf{Code:} \texttt{apogee\_core/simulate.py::simulate\_ascent\_final}.
-
-From $\bm y_f$ it computes terminal $(a(\bm u), e(\bm u))$ using the two-body formulas.
-
-\subsection{Residual definition}
-The residual implemented is
-\begin{equation}
- \boxed{\bm F(\bm u) = \begin{bmatrix}
- \dfrac{a(\bm u)-r_{\mathrm{target}}}{r_{\mathrm{target}}}\\
- e(\bm u)\\
- \gamma(\bm u)
- \end{bmatrix}.}
-\end{equation}
-Rationale:
+\subsection{Phase B: Gravity Turn (Stage 1)}
 \begin{itemize}
-\item A circular orbit at radius $r_{\mathrm{target}}$ has $a=r_{\mathrm{target}}$.
-\item Circularity requires $e=0$.
-\item Tangency at insertion requires $\gamma=0$.
+    \item \textbf{Control}: $\alpha = 0$ (Thrust aligned with velocity).
+    \item \textbf{Dynamics}: Full EOM (\ref{eq:dr}-\ref{eq:dm}).
+    \item \textbf{Termination Event}: Mass reaches $m_{1,\text{end}}$ (Stage 1 burnout).
+    \item \textbf{Transition}: Stage separation ($m \to m - m_{1,\text{dry}}$).
 \end{itemize}
-\textbf{Code:} \texttt{apogee\_core/shooting.py::compute\_residuals}.
 
-\section{Numerical method for shooting}
-\subsection{Bound constraints and logistic re-parameterization}
-Physical bounds are enforced:
-\begin{equation}
- \theta_0\in[\theta_{\min},\theta_{\max}],\quad t_{\mathrm{coast}}\in[0,200],\quad t_{\mathrm{burn2}}\in[50,450],\quad \alpha_2\in[\alpha_{\min},\alpha_{\max}].
-\end{equation}
-To solve in $\mathbb{R}^4$, introduce $\bm x\in\mathbb{R}^4$ and
-\begin{equation}
- u_i(x_i)=u_{i,\min} + (u_{i,\max}-u_{i,\min})\,\sigma(x_i),
-\qquad \sigma(x)=\frac{1}{1+e^{-x}}.
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/shooting.py::\_u\_from\_x}, \texttt{\_x\_from\_u}.
-
-\subsection{Finite-difference Jacobian in \texorpdfstring{$\bm x$}{x}}
-Let $\bm f(\bm x)=\bm F(\bm u(\bm x))$. A forward-difference Jacobian is computed as
-\begin{equation}
- J_{:,i} \approx \frac{\bm f(\bm x+\Delta x_i\,\bm e_i)-\bm f(\bm x)}{\Delta x_i}.
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/shooting.py::\_fd\_jacobian\_x}.
-
-\subsection{Levenberg--Marquardt step with backtracking}
-At iteration $k$, the code solves the damped normal equations
-\begin{equation}
- (J_k^T J_k + \lambda_k I)\,\Delta\bm x_k = -J_k^T \bm f_k,
-\end{equation}
-tries a finite set of step lengths $\alpha\in\{1,\tfrac12,\tfrac14,\dots\}$, and accepts the first $\alpha$ satisfying strict decrease in $\|\bm f\|_2$.
-\textbf{Code:} \texttt{apogee\_core/shooting.py::\_newton}.
-
-\subsection{Broyden rank-1 update}
-After an accepted step $\bm s=\bm x_{k+1}-\bm x_k$ and $\bm y=\bm f_{k+1}-\bm f_k$,
-\begin{equation}
- J_{k+1}=J_k+\frac{(\bm y-J_k\bm s)\bm s^T}{\bm s^T\bm s}.
-\end{equation}
-This reduces expensive residual evaluations.
-\textbf{Code:} \texttt{apogee\_core/shooting.py::\_broyden\_update}.
-
-\subsection{Multistart candidate generation and scoring}
-Candidates are generated from a seed and coarse grids for each control variable, then scored by $\|\bm F(\bm u_0)\|_2$ to select the best initializations.
-\textbf{Code:} candidate generation in \texttt{apogee\_core/shooting.py} near \texttt{theta0\_grid, t\_coast\_grid, t\_burn2\_grid, alpha2\_grid}.
-
-\subsection{Convergence criteria}
-The implementation checks component-wise tolerances and an overall norm tolerance:
-\begin{equation}
- |F_1|<\varepsilon_1,\quad |F_2|<\varepsilon_2,\quad |F_3|<\varepsilon_3
- \quad\text{or}\quad \|\bm F\|_2<\varepsilon.
-\end{equation}
-\textbf{Code:} \texttt{apogee\_core/shooting.py::\_ok} and \texttt{\_ok\_norm}.
-
-\section{Serialization: JSON trajectory output}
-The function \texttt{trajectory\_to\_dict} returns JSON-serializable arrays with explicit unit suffixes:
+\subsection{Phase C: Coast}
 \begin{itemize}
-\item \texttt{t\_s}, \texttt{r\_m}, \texttt{h\_m}, \texttt{lambda\_rad}, \texttt{v\_mps}, \texttt{gamma\_rad}, \texttt{m\_kg}, \texttt{q\_pa}, \texttt{mach}, \texttt{drag\_n}.
-\item \texttt{pos\_m}: planar $(x,y,z)$ with $z=0$.
-\item \texttt{vel\_mps}: planar $(v_x,v_y,v_z)$ with $v_z=0$.
-\item \texttt{orbit}: scalar two-body diagnostics.
+    \item \textbf{Control}: $T = 0$, $\dot{m} = 0$.
+    \item \textbf{Dynamics}: Ballistic motion (Drag + Gravity).
+    \item \textbf{Termination Event}: Time duration $t_{\text{coast}}$ elapses.
 \end{itemize}
-\textbf{Code:} \texttt{apogee\_core/trajectory.py::trajectory\_to\_dict}.
 
-\section{Calibration module (implemented, but auxiliary)}
-The repository also contains a calibration routine in \texttt{apogee\_core/calibration.py}. It defines an outer optimization problem (SciPy L-BFGS-B) over a small parameter vector (e.g., $I_{sp,1}$, $I_{sp,2}$, $t_{1,\mathrm{burn}}$, constant $C_D$ value), while calling the shooting solver as an inner loop.
+\subsection{Phase D: Stage 2 Burn}
+\begin{itemize}
+    \item \textbf{Control}: $\alpha = \alpha_2$ (Constant steering angle).
+    \item \textbf{Termination Event}: Time duration $t_{\text{burn2}}$ or Fuel Depletion.
+\end{itemize}
 
-This module is not required for running the simulator/shooting pipeline, but it is part of the implemented code and therefore documented here.
+\section{Numerical Methods}
+\label{sec:numerical_methods}
 
-\section{Equation-to-code map}
-\begin{center}
-\begin{tabular}{@{}ll@{}}
-\toprule
-Mathematical object & Implementation \\
-\midrule
-Atmosphere table, interpolation, vacuum extension & \texttt{apogee\_core/atmosphere.py} \\
-Derived scalars $(h,\rho,a_s,M,D,q)$ & \texttt{apogee\_core/dynamics.py::compute\_derived} \\
-ODE RHS (general) & \texttt{apogee\_core/dynamics.py::rhs\_general} \\
-Vertical / gravity turn / coast & \texttt{rhs\_vertical}, \texttt{rhs\_gravity\_turn}, \texttt{rhs\_coast} \\
-Event functions & \texttt{apogee\_core/simulate.py::\_cond\_*} \\
-ODE solve per segment & \texttt{apogee\_core/simulate.py::\_solve\_segment} \\
-Time monotonicity filter & \texttt{apogee\_core/simulate.py::\_strictly\_increasing\_mask} \\
-Orbital diagnostics $(\varepsilon,h,a,e,r_a,r_p)$ & \texttt{apogee\_core/orbit.py} \\
-Shooting residual $[(a-r_t)/r_t,\ e,\ \gamma]$ & \texttt{apogee\_core/shooting.py::compute\_residuals} \\
-LM step + Broyden + line search & \texttt{apogee\_core/shooting.py::\_newton} \\
-Trajectory JSON & \texttt{apogee\_core/trajectory.py::trajectory\_to\_dict} \\
-\bottomrule
-\end{tabular}
-\end{center}
+\subsection{Integration (Tsit5)}
+We use the \textbf{Tsitouras 5(4)} method, an explicit Runge-Kutta method. It is an adaptive step-size solver.
+\begin{itemize}
+    \item \textbf{How it works}: It computes the solution at $t + \Delta t$ using a 5th-order formula and a 4th-order formula. The difference between these two estimates provides an error estimate.
+    \item \textbf{Adaptivity}: If the error is greater than the tolerance (\texttt{rtol}, \texttt{atol}), the step size $\Delta t$ is reduced. If the error is very small, $\Delta t$ is increased to speed up computation.
+\end{itemize}
+
+\subsection{Event Handling (Newton-Raphson)}
+To detect events (like reaching a specific altitude), we solve $g(\bm{y}, t) = 0$.
+The solver steps over the event (where $g$ changes sign) and then uses the \textbf{Newton-Raphson} method to iteratively find the exact time $t^*$ where $g(t^*) = 0$.
+
+\section{Orbital Mechanics}
+\label{sec:orbit}
+At injection, we calculate the osculating orbital elements:
+
+\textbf{Specific Mechanical Energy:}
+\begin{equation}
+    \label{eq:energy}
+    \varepsilon = \frac{v^2}{2} - \frac{\mu}{r}
+\end{equation}
+
+\textbf{Specific Angular Momentum:}
+\begin{equation}
+    \label{eq:ang_mom}
+    h_{\text{ang}} = r v \cos\gamma
+\end{equation}
+
+\textbf{Eccentricity:}
+\begin{equation}
+    \label{eq:eccentricity}
+    e = \sqrt{1 + \frac{2 \varepsilon h_{\text{ang}}^2}{\mu^2}}
+\end{equation}
+
+\textbf{Semi-major Axis:}
+\begin{equation}
+    \label{eq:semi_major}
+    a = - \frac{\mu}{2 \varepsilon}
+\end{equation}
+
+\section{Optimization Algorithm (Shooting Method)}
+\label{sec:optimization}
+
+We wish to find the control parameters $\bm{u}$ that result in a circular orbit at a specific target altitude.
+
+\subsection{Problem Formulation}
+\textbf{Decision Variables ($\bm{u}$):}
+\begin{itemize}
+    \item $\theta_0$: Initial pitch-over angle.
+    \item $t_{\text{coast}}$: Duration of coast phase.
+    \item $t_{\text{burn2}}$: Duration of second burn.
+    \item $\alpha_2$: Steering angle for second stage.
+\end{itemize}
+
+\textbf{Residuals ($\bm{F}(\bm{u})$):}
+We want the final state to match:
+\begin{equation}
+    \label{eq:residuals}
+    \bm{F}(\bm{u}) = \begin{bmatrix}
+        (a - r_{\text{target}}) / r_{\text{target}} \\
+        e \\
+        \gamma
+    \end{bmatrix} \approx \bm{0}
+\end{equation}
+This enforces correct altitude ($a=r$), circularity ($e=0$), and zero vertical velocity ($\gamma=0$).
+
+\subsection{Algorithm: Levenberg-Marquardt with Broyden}
+This is a root-finding algorithm designed to be robust against poor initial guesses.
+
+\begin{enumerate}
+    \item \textbf{Variable Transformation}: We map the bounded physical variables $\bm{u}$ to unbounded variables $\bm{x}$ using a sigmoid function (Eq. \ref{eq:logistic}). This allows the optimizer to work in $\mathbb{R}^n$ without violating physical constraints.
+    \begin{equation}
+        \label{eq:logistic}
+        u_i = u_{\min} + (u_{\max} - u_{\min}) \cdot \sigma(x_i)
+    \end{equation}
+    
+    \item \textbf{Jacobian Calculation}: We compute the sensitivity matrix (Jacobian) $J = \partial \bm{F} / \partial \bm{x}$ using Finite Differences. This tells us how the errors change when we tweak the controls.
+    
+    \item \textbf{Damped Step (Levenberg-Marquardt)}: instead of a pure Newton step ($\Delta \bm{x} = -J^{-1}\bm{F}$), we solve:
+    \begin{equation}
+        (J^T J + \lambda I) \Delta \bm{x} = -J^T \bm{F}
+    \end{equation}
+    $\lambda$ is a damping parameter.
+    \begin{itemize}
+        \item Large $\lambda$: Behaves like Gradient Descent (slow but reliable).
+        \item Small $\lambda$: Behaves like Gauss-Newton (fast convergence near solution).
+    \end{itemize}
+    
+    \item \textbf{Broyden Update}: Re-computing the Jacobian with finite differences is expensive (requires 4+ simulations). We use the Broyden rank-1 update to approximate the new Jacobian based on the change in residuals, saving computation time.
+\end{enumerate}
 
 \end{document}
