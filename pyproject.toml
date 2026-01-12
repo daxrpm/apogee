@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Rocket launch and orbital mechanics simulator"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "apogee-physics",
+    "apogee-launch",
+    "apogee-orbit",
+    "apogee-api",
+]
 
 [tool.uv.workspace]
 members = ["packages/*"]
