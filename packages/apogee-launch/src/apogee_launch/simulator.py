@@ -239,8 +239,8 @@ def solve_to_circular_orbit(
     """
     if payload_kg < 0.0 or payload_kg > 10_000.0:
         raise ValueError("payload_kg must be in [0, 10000]")
-    if h_target_km <= 160.0:
-        raise ValueError("h_target_km must be > 160 km (LEO minimum altitude)")
+    if h_target_km < 160.0 or h_target_km > 400.0:
+        raise ValueError("h_target_km must be in [160, 400] km (LEO minimum and maximum altitudes)")
 
     h_target_m = float(h_target_km) * 1000.0
     payload_mass = float(payload_kg)
