@@ -54,6 +54,20 @@ wheels = [
 name = "apogee"
 version = "0.1.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "apogee-api" },
+    { name = "apogee-launch" },
+    { name = "apogee-orbit" },
+    { name = "apogee-physics" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "apogee-api", editable = "packages/apogee-api" },
+    { name = "apogee-launch", editable = "packages/apogee-launch" },
+    { name = "apogee-orbit", editable = "packages/apogee-orbit" },
+    { name = "apogee-physics", editable = "packages/apogee-physics" },
+]
 
 [[package]]
 name = "apogee-api"
