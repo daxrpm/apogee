@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Tuple
 
 import diffrax
@@ -13,6 +14,8 @@ from .dynamics import compute_derived, rhs_general, rhs_gravity_turn, rhs_vertic
 from .orbit import orbit_diagnostics
 from .trajectory import OrbitDiagnostics, Trajectory
 from .types import AscentConfig, StageParams
+
+logger = logging.getLogger(__name__)
 
 
 Array = jax.Array
@@ -213,6 +216,7 @@ def _get_last_time(ts: Array) -> Array:
         return ts[-1]
 
 def simulate_ascent(config: AscentConfig) -> Trajectory:
+    logger.debug(f"Starting ascent simulation: h_target={config.mission.h_target/1000:.1f}km, payload={config.mission.payload_mass:.1f}kg")
     earth = config.earth
     vehicle = config.vehicle
     numerics = config.numerics
@@ -234,6 +238,7 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     h_pitch_over = max(float(numerics.h_pitch_over), 2000.0)
     args_vertical = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), h_pitch_over)
 
+    logger.debug(f"Phase A (Vertical): t0=0.0s, h_pitchover={h_pitch_over:.1f}m")
     ts_a, ys_a, result_a, event_mask_a = _solve_segment(
         term=term_vertical,
         solver=solver,
@@ -247,6 +252,8 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         atol=numerics.atol,
         max_steps=numerics.max_steps,
     )
+    if not isinstance(ts_a, jax.core.Tracer):
+        logger.debug(f"Phase A completed: {len(ts_a)} steps, t_end={float(ts_a[-1]):.2f}s")
 
     _require_event(
         result_a,
@@ -258,6 +265,8 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
 
     y_po = _get_last_state(ts_a, ys_a)
     y_po = y_po.at[_GAMMA].set(jnp.pi / 2.0 - numerics.theta0)
+    if not isinstance(y_po, jax.core.Tracer):
+        logger.debug(f"Pitch-over: gamma={float(jnp.pi/2.0 - numerics.theta0):.4f}rad ({float(np.rad2deg(numerics.theta0)):.2f}deg from vertical)")
 
     event_s1 = diffrax.Event((_cond_stage1_burnout, _cond_ground), root_finder=root_finder)
 
@@ -272,6 +281,7 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     t0_b = _get_last_time(ts_a)
     t1_b = numerics.t_max
 
+    logger.debug(f"Phase B (Stage 1 Gravity Turn): t0={float(t0_b):.2f}s, m_target={m1_end:.1f}kg")
     ts_b, ys_b, result_b, event_mask_b = _solve_segment(
         term=term_s1,
         solver=solver,
@@ -285,6 +295,8 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         atol=numerics.atol,
         max_steps=numerics.max_steps,
     )
+    if not isinstance(ts_b, jax.core.Tracer):
+        logger.debug(f"Phase B completed: {len(ts_b)} steps, t_end={float(ts_b[-1]):.2f}s")
 
     # Use extracted end state
     y_b_end = _get_last_state(ts_b, ys_b)
@@ -304,6 +316,8 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     # Apply separation: remove stage 1 dry mass
     # Transition: Stage Separation [Report Section 5.2]
     y_sep = y_b_end.at[_M].set(y_b_end[_M] - vehicle.m1_dry)
+    if not isinstance(y_sep, jax.core.Tracer):
+        logger.debug(f"Stage separation: m_before={float(y_b_end[_M]):.1f}kg, m_after={float(y_sep[_M]):.1f}kg (dropped {vehicle.m1_dry:.1f}kg)")
 
     # Phase C: Coast [Report Section 5.3]
     # Control: T=0, dm/dt=0
@@ -319,6 +333,7 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     args_coast = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps))
 
     event_coast = diffrax.Event(_cond_ground, root_finder=root_finder)
+    logger.debug(f"Phase C (Coast): t0={float(t0_coast):.2f}s, duration={numerics.t_coast:.2f}s")
     ts_coast, ys_coast, result_coast, event_mask_coast = _solve_segment(
         term=term_coast,
         solver=solver,
@@ -332,6 +347,8 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         atol=numerics.atol,
         max_steps=numerics.max_steps,
     )
+    if not isinstance(ts_coast, jax.core.Tracer):
+        logger.debug(f"Phase C completed: {len(ts_coast)} steps, t_end={float(ts_coast[-1]):.2f}s")
     
     y_coast_end = _get_last_state(ts_coast, ys_coast)
 
@@ -353,6 +370,7 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     term_s2 = diffrax.ODETerm(_term_rhs_stage2_steer)
     args_s2 = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps), m_min_s2, jnp.array(numerics.alpha2))
 
+    logger.debug(f"Phase D (Stage 2 Burn): t0={float(t0_d):.2f}s, duration={numerics.t_burn2:.2f}s, alpha2={np.rad2deg(numerics.alpha2):.2f}deg")
     ts_d, ys_d, result_d, event_mask_d = _solve_segment(
         term=term_s2,
         solver=solver,
@@ -366,6 +384,8 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         atol=numerics.atol,
         max_steps=numerics.max_steps,
     )
+    if not isinstance(ts_d, jax.core.Tracer):
+        logger.debug(f"Phase D completed: {len(ts_d)} steps, t_end={float(ts_d[-1]):.2f}s")
 
     if result_d == diffrax.RESULTS.event_occurred and _event_mask_is(event_mask_d, 1):
         raise RuntimeError("Stage 2 terminated by ground impact; check guidance/parameters.")

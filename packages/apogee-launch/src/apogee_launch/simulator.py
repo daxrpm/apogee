@@ -5,6 +5,7 @@ Maintains all original logic while providing clean API for FastAPI.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -28,6 +29,8 @@ from apogee_physics import (
 from apogee_physics.calibration import ConstantCd
 
 from .falcon9 import FALCON9_DEFAULT, Falcon9Params
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -237,15 +240,20 @@ def solve_to_circular_orbit(
     Returns:
         LaunchResult with optimal parameters and trajectory
     """
+    logger.info(f"Starting launch simulation: h_target={h_target_km:.1f}km, payload={payload_kg:.1f}kg")
+    
     if payload_kg < 0.0 or payload_kg > 10_000.0:
+        logger.error(f"Invalid payload: {payload_kg}kg (must be in [0, 10000])")
         raise ValueError("payload_kg must be in [0, 10000]")
     if h_target_km < 160.0 or h_target_km > 400.0:
+        logger.error(f"Invalid altitude: {h_target_km}km (must be in [160, 400])")
         raise ValueError("h_target_km must be in [160, 400] km (LEO minimum and maximum altitudes)")
 
     h_target_m = float(h_target_km) * 1000.0
     payload_mass = float(payload_kg)
 
-    vehicle, _, _, _ = create_falcon9_vehicle(payload_mass, params=falcon9_params)
+    vehicle, t1_burn, m1_prop, m2_prop = create_falcon9_vehicle(payload_mass, params=falcon9_params)
+    logger.debug(f"Vehicle configured: m0={vehicle.m0:.1f}kg, t1_burn={t1_burn:.1f}s, m1_prop={m1_prop:.1f}kg, m2_prop={m2_prop:.1f}kg")
 
     earth = EarthParams(r_e=6_371_000.0, mu=3.986004418e14, g0=9.80665)
     mission = MissionParams(h_target=h_target_m, payload_mass=payload_mass)
@@ -275,7 +283,9 @@ def solve_to_circular_orbit(
         atmosphere_dz=atmosphere_dz,
     )
 
+    logger.info("Starting shooting method optimization...")
     opt_config, traj = solve_circular_orbit(base_config)
+    logger.info("Optimization complete")
 
     t_arr = np.array(traj.t)
     mask = np.isfinite(t_arr)
@@ -291,6 +301,12 @@ def solve_to_circular_orbit(
     r_target_m = earth.r_e + h_target_m
     v_circ_mps = math.sqrt(earth.mu / r_target_m)
 
+    logger.info("Mission success:")
+    logger.info(f"  Eccentricity: {ecc:.6f}")
+    logger.info(f"  Altitude error: {h_final_m - h_target_m:.1f}m")
+    logger.info(f"  Velocity error: {v_final_mps - v_circ_mps:.3f}m/s")
+    logger.info(f"  Flight-path angle: {gamma_final_rad * 180.0 / math.pi:.4f}deg")
+    
     result = LaunchResult(
         schema_version=1,
         inputs={

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import logging
 import math
 from typing import Any
 
@@ -11,6 +12,8 @@ import numpy as np
 from .simulate import simulate_ascent, simulate_ascent_final
 from .trajectory import Trajectory, trajectory_to_dict
 from .types import AscentConfig
+
+logger = logging.getLogger(__name__)
 
 Array = jax.Array
 
@@ -31,6 +34,7 @@ def compute_residuals(u: np.ndarray, base_config: AscentConfig) -> np.ndarray:
     
     # Check physical bounds to prevent simulator crashes
     if theta0 < 0 or theta0 > 0.35 or t_coast < 0 or t_burn2 < 0 or abs(alpha2) > 0.6:
+        logger.debug(f"Control out of bounds: theta0={np.rad2deg(theta0):.2f}deg, t_coast={t_coast:.1f}s, t_burn2={t_burn2:.1f}s, alpha2={np.rad2deg(alpha2):.2f}deg")
         return np.array([1e3, 1e3, 1e3]) # Penalty
 
     numerics_new = replace(base_config.numerics, theta0=theta0, t_coast=t_coast, t_burn2=t_burn2, alpha2=alpha2)
@@ -38,7 +42,8 @@ def compute_residuals(u: np.ndarray, base_config: AscentConfig) -> np.ndarray:
 
     try:
         _t_final, y_final = simulate_ascent_final(config)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Simulation failed: {type(e).__name__}")
         return np.array([1e3, 1e3, 1e3])
 
     r_final = float(y_final[0])
@@ -51,10 +56,12 @@ def compute_residuals(u: np.ndarray, base_config: AscentConfig) -> np.ndarray:
     # CRITICAL: Check fuel depletion (prevent negative mass)
     m_min = base_config.vehicle.m2_dry + base_config.mission.payload_mass
     if m_final < m_min - 1.0:  # Allow 1kg tolerance
+        logger.debug(f"Fuel violation: m_final={m_final:.1f}kg < m_min={m_min:.1f}kg")
         return np.array([1e4, 1e4, 1e4])  # Massive penalty for fuel violation
     
     # Check for crash or invalid state
     if r_final < earth.r_e + 100.0 or not math.isfinite(r_final):
+        logger.debug(f"Invalid final state: r_final={r_final:.1f}m")
         return np.array([1e4, 1e4, 1e4])
 
     r_target = earth.r_e + config.mission.h_target
@@ -133,6 +140,7 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
         return float(np.linalg.norm(F)) < 7.5e-4
 
     def _fd_jacobian_x(x: np.ndarray, f0: np.ndarray, eval_budget: list[int]) -> np.ndarray:
+        logger.debug("Computing Jacobian via finite differences")
         J = np.zeros((3, 4), dtype=float)
         steps = np.array([2e-2, 5e-2, 5e-2, 2e-2], dtype=float)
         for i in range(4):
@@ -141,14 +149,19 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
             eval_budget[0] += 1
             f_plus = compute_residuals(_u_from_x(x + du), base_config)
             J[:, i] = (f_plus - f0) / steps[i]
+        cond_num = np.linalg.cond(J)
+        logger.debug(f"Jacobian: cond(J)={cond_num:.2e}")
         return J
 
     def _broyden_update(J: np.ndarray, s: np.ndarray, y: np.ndarray) -> np.ndarray:
         denom = float(np.dot(s, s))
         if denom <= 0.0:
+            logger.debug("Broyden update skipped: ||s||^2 <= 0")
             return J
         Js = J @ s
-        return J + np.outer((y - Js), s) / denom
+        J_new = J + np.outer((y - Js), s) / denom
+        logger.debug(f"Broyden rank-1 update: ||s||={np.linalg.norm(s):.3e}, ||y||={np.linalg.norm(y):.3e}")
+        return J_new
 
     def _newton(u0: np.ndarray) -> np.ndarray:
         x = _x_from_u(u0.astype(float))
@@ -161,20 +174,29 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
 
         u = _u_from_x(x)
         f = compute_residuals(u, base_config)
-        if float(np.linalg.norm(f)) > 100.0:
+        f_norm_init = float(np.linalg.norm(f))
+        if f_norm_init > 100.0:
+            logger.debug(f"Initial guess infeasible: ||F||={f_norm_init:.3e}")
             raise RuntimeError("Initial guess is infeasible")
         eval_budget[0] += 1
+        logger.debug(f"Initial: u=[{np.rad2deg(u[0]):.2f}deg, {u[1]:.1f}s, {u[2]:.1f}s, {np.rad2deg(u[3]):.2f}deg], ||F||={f_norm_init:.6e}")
         J = _fd_jacobian_x(x, f, eval_budget)
 
         lam = 1e-2
+        iteration = 0
 
         for _ in range(130):
+            iteration += 1
             if eval_budget[0] > max_evals:
+                logger.warning(f"Max evaluations reached: {eval_budget[0]}/{max_evals}")
                 break
             if _ok(f):
+                logger.info(f"Converged in {iteration} iterations, {eval_budget[0]} evaluations")
+                logger.info(f"Final: ||F||={float(np.linalg.norm(f)):.6e}, F=[{f[0]:.3e}, {f[1]:.3e}, {f[2]:.3e}]")
                 return u
 
             f_norm = float(np.linalg.norm(f))
+            logger.debug(f"Iter {iteration}: ||F||={f_norm:.6e}, lambda={lam:.3e}")
             accepted = False
 
             for _lm_try in range(12):
@@ -210,6 +232,7 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
                         u = u_try
                         f = f_try
                         lam = max(1e-8, lam / 2.0)
+                        logger.debug(f"  Step accepted: alpha={alpha:.3f}, ||F||={f_try_norm:.6e} (reduced by {(1-f_try_norm/f_norm)*100:.1f}%)")
                         accepted = True
                         break
 
@@ -217,22 +240,28 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
                     break
 
                 lam = min(lam * 10.0, lam_max)
-
+                logger.debug(f"  LM damping increased: lambda={lam:.3e}")
             if not accepted:
                 if (not math.isfinite(lam)) or lam >= lam_max:
                     resets += 1
+                    logger.debug(f"  Damping too large, resetting (reset {resets}/{max_resets})")
                     if resets > max_resets:
+                        logger.warning(f"Max resets reached: {resets}")
                         break
                     lam = 1e-1
                     eval_budget[0] += 1
                     J = _fd_jacobian_x(x, f, eval_budget)
                     continue
+                logger.debug(f"  No step accepted, recomputing Jacobian")
                 eval_budget[0] += 1
                 J = _fd_jacobian_x(x, f, eval_budget)
                 lam = max(lam, 1e-1)
+        final_norm = float(np.linalg.norm(f))
+        logger.warning(f"Failed to converge after {iteration} iterations, {eval_budget[0]} evaluations")
+        logger.warning(f"Final: ||F||={final_norm:.6e}, F=[{f[0]:.3e}, {f[1]:.3e}, {f[2]:.3e}]")
         raise RuntimeError(
             "Shooting did not converge"
-            + f" (evals={eval_budget[0]}/{max_evals}, u={u.tolist()}, ||F||={float(np.linalg.norm(f)):.6g}, F={f.tolist()})"
+            + f" (evals={eval_budget[0]}/{max_evals}, u={u.tolist()}, ||F||={final_norm:.6g}, F={f.tolist()})"
         )
 
     # Use physics-based initial guess
@@ -296,6 +325,7 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
                 for a2 in alpha2_grid:
                     candidates.append(np.array([float(th), float(tc), float(tb), float(a2)]))
 
+    logger.info(f"Multistart: evaluating {len(candidates)} candidate initial guesses")
     scored: list[tuple[float, np.ndarray]] = []
     for u0 in candidates:
         F0 = compute_residuals(_project(u0), base_config)
@@ -303,14 +333,18 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
         if math.isfinite(n0) and n0 < 100.0:
             scored.append((n0, _project(u0)))
     scored.sort(key=lambda x: x[0])
+    logger.info(f"Found {len(scored)} feasible candidates, best initial ||F||={scored[0][0]:.3e}")
     if len(scored) == 0:
+        logger.error("No feasible initial guesses found")
         raise RuntimeError("No feasible initial guesses found for shooting")
 
     last_err: Exception | None = None
     best_result = None
     best_residual = float("inf")
 
-    for _n0, u0 in scored[:32]:
+    logger.info(f"Attempting optimization from top {min(32, len(scored))} candidates")
+    for attempt, (_n0, u0) in enumerate(scored[:32], 1):
+        logger.debug(f"Attempt {attempt}: initial ||F||={_n0:.3e}")
         try:
             u = _newton(u0)
             F = compute_residuals(u, base_config)
@@ -318,15 +352,20 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
             if residual < best_residual:
                 best_residual = residual
                 best_result = u
+                logger.debug(f"  New best: ||F||={residual:.6e}")
             if _ok(F) or _ok_norm(F):
+                logger.info(f"Shooting converged on attempt {attempt}")
                 break
         except Exception as e:
+            logger.debug(f"  Attempt {attempt} failed: {type(e).__name__}")
             last_err = e
             continue
     
     if best_result is not None and best_residual < 1e-3:
         u = best_result
+        logger.info(f"Accepting best result: ||F||={best_residual:.6e}")
     else:
+        logger.error(f"All attempts failed. Best residual: {best_residual:.6e}")
         if last_err is None:
             raise RuntimeError("Shooting did not converge")
         raise last_err
@@ -336,6 +375,12 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
     t_coast_star = float(u[1])
     t_burn2_star = float(u[2])
     alpha2_star = float(u[3])
+    
+    logger.info(f"Optimal control found:")
+    logger.info(f"  theta0 = {np.rad2deg(theta0_star):.4f} deg")
+    logger.info(f"  t_coast = {t_coast_star:.2f} s")
+    logger.info(f"  t_burn2 = {t_burn2_star:.2f} s")
+    logger.info(f"  alpha2 = {np.rad2deg(alpha2_star):.4f} deg")
     
     numerics_star = replace(
         base_config.numerics,

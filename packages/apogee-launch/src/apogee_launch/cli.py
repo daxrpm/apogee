@@ -1,6 +1,8 @@
 """CLI for apogee-launch simulator."""
 
 import json
+import logging
+import sys
 from typing import Optional
 
 import typer
@@ -18,8 +20,33 @@ def main(
     theta0_deg: Optional[float] = typer.Option(None, "--theta0-deg", help="Initial pitch-over angle [degrees]"),
     t_coast: Optional[float] = typer.Option(None, "--t-coast", help="Initial coast duration [s]"),
     t_burn2: Optional[float] = typer.Option(None, "--t-burn2", help="Initial stage 2 burn time [s]"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug logging (numerical methods details)"),
 ):
     """Simulate rocket launch to circular orbit using shooting method."""
+    
+    # Configure logging
+    log_level = logging.WARNING
+    if verbose:
+        log_level = logging.INFO
+    if debug:
+        log_level = logging.DEBUG
+    
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler(sys.stderr)],
+    )
+    
+    # Set specific levels for different modules
+    if debug:
+        logging.getLogger('apogee_physics.shooting').setLevel(logging.DEBUG)
+        logging.getLogger('apogee_physics.simulate').setLevel(logging.DEBUG)
+    else:
+        logging.getLogger('apogee_physics.shooting').setLevel(logging.INFO)
+        logging.getLogger('apogee_physics.simulate').setLevel(logging.WARNING)
+    
+    logging.getLogger('apogee_launch').setLevel(log_level)
     
     kwargs = {}
     if theta0_deg is not None:
