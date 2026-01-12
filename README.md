@@ -1,6 +1,6 @@
 # Apogee
 
-Apogee is a **two-stage rocket ascent simulator** with a robust **shooting method** that converges to a near-circular LEO orbit for target altitudes typically in the **160–400 km** range and payloads up to **10,000 kg**.
+Apogee is a **two-stage rocket ascent simulator** with a robust **shooting method** that converges to a near-circular LEO orbit for target altitudes in the **160–400 km** range and payloads up to **10,000 kg**.
 
 The implementation is designed to be:
 
