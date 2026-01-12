@@ -30,15 +30,18 @@ class AtmosphereTable:
         return cls(z_m=z_m, rho=rho, cs=cs)
 
     def rho_at(self, h_m: Array) -> Array:
+        """Interpolate density rho(h) [Section 4.1, Eq. 15]."""
         # FIX 3: Hold last table value above z_max for C0-continuous extrapolation.
         return jnp.interp(h_m, self.z_m, self.rho, left=self.rho[0], right=self.rho[-1])
 
     def cs_at(self, h_m: Array) -> Array:
+        """Interpolate speed of sound cs(h) [Section 4.1, Eq. 15]."""
         # FIX 3: Hold last table value above z_max for C0-continuous extrapolation.
         return jnp.interp(h_m, self.z_m, self.cs, left=self.cs[0], right=self.cs[-1])
 
 
 def build_atmosphere_table(*, z_max_m: float, dz_m: float) -> AtmosphereTable:
+    """Build discrete USSA76 table for interpolation [Section 4.1]."""
     z_max_m = float(z_max_m)
     dz_m = float(dz_m)
     return _build_atmosphere_table_cached(z_max_m=z_max_m, dz_m=dz_m)

@@ -302,9 +302,11 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
         raise RuntimeError("Stage 1 segment terminated by ground impact; check guidance/parameters.")
 
     # Apply separation: remove stage 1 dry mass
+    # Transition: Stage Separation [Report Section 5.2]
     y_sep = y_b_end.at[_M].set(y_b_end[_M] - vehicle.m1_dry)
 
-    # Coast Phase (New Phase C)
+    # Phase C: Coast [Report Section 5.3]
+    # Control: T=0, dm/dt=0
     # -------------------------
     t0_coast = _get_last_time(ts_b)
     t1_coast = t0_coast + numerics.t_coast
@@ -333,7 +335,8 @@ def simulate_ascent(config: AscentConfig) -> Trajectory:
     
     y_coast_end = _get_last_state(ts_coast, ys_coast)
 
-    # Stage 2 Burn (Phase D)
+    # Phase D: Stage 2 Burn [Report Section 5.4]
+    # Control: alpha = alpha2 (constant)
     # ----------------------
     # Control variable is now t_burn2 (duration), not m_cut
     if result_coast == diffrax.RESULTS.event_occurred:
@@ -461,9 +464,11 @@ def simulate_ascent_final(config: AscentConfig) -> tuple[Array, Array]:
 
     y0 = jnp.array([earth.r_e + 1.0, 0.0, 0.0, jnp.pi / 2.0, vehicle.m0])
 
+    # Numerical Methods [Report Section 6]
     solver = diffrax.Tsit5()
     root_finder = optx.Newton(rtol=numerics.root_rtol, atol=numerics.root_atol, norm=optx.rms_norm)
 
+    # Phase A: Vertical Ascent [Report Section 5.1]
     term_vertical = diffrax.ODETerm(_term_rhs_vertical)
     h_pitch_over = max(float(numerics.h_pitch_over), 2000.0)
     args_vertical = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), h_pitch_over)
@@ -485,8 +490,10 @@ def simulate_ascent_final(config: AscentConfig) -> tuple[Array, Array]:
     if result_a != diffrax.RESULTS.event_occurred or _event_mask_is(event_mask_a, 1):
         raise RuntimeError("Vertical phase failed (pitch-over not reached or ground impact).")
 
+    # Transition: Pitch-Over
     y_po = y_a.at[_GAMMA].set(jnp.pi / 2.0 - numerics.theta0)
 
+    # Phase B: Stage 1 Gravity Turn [Report Section 5.2]
     term_s1 = diffrax.ODETerm(_term_rhs_gravity_turn)
     args_s1 = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), m1_end)
     event_s1 = diffrax.Event((_cond_stage1_burnout, _cond_ground), root_finder=root_finder)

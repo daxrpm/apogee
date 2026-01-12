@@ -16,6 +16,14 @@ Array = jax.Array
 
 
 def compute_residuals(u: np.ndarray, base_config: AscentConfig) -> np.ndarray:
+    """Compute shooting residuals per LaTeX Report (Section 8.1).
+
+    Decision Variables u: [theta0, t_coast, t_burn2, alpha2]
+    Residuals F(u): [Eq. 22]
+      1. (a - r_target) / r_target
+      2. eccentricity
+      3. flight-path angle gamma
+    """
     theta0 = float(u[0])
     t_coast = float(u[1])
     t_burn2 = float(u[2])
@@ -66,6 +74,7 @@ def compute_residuals(u: np.ndarray, base_config: AscentConfig) -> np.ndarray:
     e2 = max(0.0, e2)
     e = math.sqrt(e2)
 
+    # Residual vector F(u) [Eq. 22]
     f1 = (a - r_target) / r_target
     f2 = e
     f3 = gamma_final
@@ -74,6 +83,10 @@ def compute_residuals(u: np.ndarray, base_config: AscentConfig) -> np.ndarray:
 
 
 def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Trajectory]:
+    """Solve the circular orbit insertion problem using Levenberg-Marquardt.
+
+    Algorithm detailed in LaTeX Report (Section 8.2).
+    """
     # Ensure the atmosphere table covers the target altitude (and some margin) so
     # residuals and the final trajectory are evaluated with a consistent model.
     # This avoids relying on extrapolation behavior above atmosphere_z_max.
@@ -100,11 +113,13 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
         return np.minimum(np.maximum(u, bounds[:, 0]), bounds[:, 1])
 
     def _u_from_x(x: np.ndarray) -> np.ndarray:
+        """Logistic re-parameterization from unbounded x to bounded u [Eq. 23]."""
         x = np.clip(x, -20.0, 20.0)
         s = 1.0 / (1.0 + np.exp(-x))
         return bounds[:, 0] + (bounds[:, 1] - bounds[:, 0]) * s
 
     def _x_from_u(u: np.ndarray) -> np.ndarray:
+        """Inverse logistic transform [Eq. 23 inverse]."""
         u = _project(u)
         span = bounds[:, 1] - bounds[:, 0]
         z = (u - bounds[:, 0]) / span
