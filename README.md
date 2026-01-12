@@ -1,183 +1,129 @@
-# APOGEE: Falcon 9 Ascent Simulator
+# Apogee
 
-**High-fidelity two-stage rocket trajectory simulation with optimal guidance parameter computation.**
+Apogee is a **two-stage rocket ascent simulator** with a robust **shooting method** that converges to a near-circular LEO orbit for target altitudes typically in the **160–400 km** range and payloads up to **10,000 kg**.
 
-## 🚀 Overview
+The implementation is designed to be:
 
-APOGEE simulates Falcon 9 v1.2 FT ascent to circular orbit using:
+- **Mathematically explicit** (state, forces, events, orbital diagnostics).
+- **Numerically strict** (adaptive RK + event root-finding; bounded shooting variables; robust failure modes).
+- **Backend/frontend-ready** (JSON-serializable trajectory for FastAPI + Three.js).
 
-- **Rigorous physics**: 2D polar coordinates, gravity turn, atmospheric drag
-- **Numerical methods**: Tsit5 (5th-order Runge-Kutta) with adaptive step-size
-- **Shooting solver**: Optimal guidance parameters (θ₀, t_coast, t_burn2) for any altitude
-- **JAX-powered**: GPU acceleration for fast parameter table generation
-
-## 📁 Repository Structure
+## Repository layout (current)
 
 ```text
 apogee/
-├── packages/apogee-core/          # Core simulation engine
-│   └── src/apogee_core/
-│       ├── simulate.py            # Main simulator
-│       ├── shooting.py            # Shooting solver
-│       ├── dynamics.py            # Equations of motion
-│       └── ...
+├── packages/
+│   └── apogee-core/
+│       └── src/apogee_core/
+│           ├── atmosphere.py   # USSA76 table + interpolation
+│           ├── dynamics.py     # ODE RHS and derived quantities
+│           ├── simulate.py     # Hybrid simulation + events (Diffrax)
+│           ├── orbit.py        # Two-body orbit diagnostics
+│           ├── shooting.py     # LM+Broyden shooting solver
+│           ├── trajectory.py   # Trajectory dataclass + JSON serializer
+│           ├── types.py        # Dataclasses (Earth/Mission/Vehicle/Numerics)
+│           └── calibration.py  # Optional offline calibration (SciPy)
 ├── scripts/
-│   ├── production_simulator.py   # Ready-to-use simulator
-│   ├── run_simulator.py          # Example usage
-│   └── use_shooting_solver.py    # Shooting solver example
-├── docs/                          # Technical documentation
-├── COLAB_PARAMETER_GENERATOR.py  # GPU-optimized parameter table generation
-└── apogee_core_standalone.zip    # Standalone package for Colab
+│   ├── production_simulator.py # Single-case runner + JSON result
+│   └── run_simulator.py        # Sweep runner (timeout + continuation)
+└── docs/
+    ├── nm_final_project.tex    # Full math report (code-consistent)
+    └── nm_final_project.pdf
 ```
 
-## 🎯 Quick Start
+## Mathematical model (high level)
 
-### Option 1: Use Pre-configured Simulator (Fastest)
+State:
 
-```python
-from scripts.production_simulator import simulate_falcon9_to_orbit
+- `y(t) = [r, lambda, v, gamma, m]`
 
-# Simulate 200 km circular orbit
-config, traj = simulate_falcon9_to_orbit(
-    h_target=200_000,  # meters
-    payload_mass=0.0,  # kg
-    verbose=True
-)
+Key physics:
 
-# Results: eccentricity < 0.02 (nearly circular)
-```
+- **Central gravity**: `mu / r^2`
+- **Drag**: `D = 0.5 * rho(h) * Cd(M) * A_ref * v^2`
+- **Mass flow**: `dm/dt = -T / (Isp * g0)`
+- **Atmosphere**: US Standard Atmosphere 1976 via `ussa1976`
 
-### Option 2: Generate Optimal Parameters for Any Altitude
+Hybrid phases and events:
 
-For altitudes other than 200 km, use the shooting solver:
+- Vertical ascent → pitch-over (altitude event)
+- Stage-1 gravity turn (burnout mass event) → separation (mass drop)
+- Coast (T=0)
+- Stage-2 burn with constant steering `alpha2` (fuel depletion + ground events)
 
-```python
-from apogee_core.shooting import solve_circular_orbit
+Full derivations and a strict mapping **equation ↔ code** are in:
 
-# Automatically finds optimal θ₀, t_coast, t_burn2
-optimal_config, traj = solve_circular_orbit(base_config)
+- `docs/nm_final_project.pdf`
 
-# Runtime: ~30-120 seconds per altitude
-```
+## Shooting solver (what it solves)
 
-### Option 3: GPU-Accelerated Parameter Table (Recommended)
+Decision variables:
 
-**For generating parameter tables (200-400 km in 10 km steps):**
+- `u = (theta0, t_coast, t_burn2, alpha2)`
 
-1. Upload `apogee_core_standalone.zip` to Google Colab
-2. Copy `COLAB_PARAMETER_GENERATOR.py` into a Colab cell
-3. Select GPU runtime (Runtime → Change runtime type → T4 GPU)
-4. Run the script
+Residual (computed at the terminal state):
 
-**Expected runtime**: 15-45 minutes on Colab GPU (vs. 3-6 hours on CPU)
+- `(a - r_target)/r_target` (semi-major axis target)
+- `e` (eccentricity)
+- `gamma` (flight-path angle)
 
-## 📊 Results
+Numerical method:
 
-The simulator achieves:
+- Tsit5 ODE integration (Diffrax) + event root-finding (Optimistix Newton)
+- Levenberg–Marquardt-type step on normal equations
+- Finite-difference Jacobian in unconstrained variables (logistic mapping to bounds)
+- Broyden update + backtracking line search
 
-- **200 km orbit**: e = 0.015 (excellent)
-- **250 km orbit**: e = 0.215 (requires shooting solver)
-- **300 km orbit**: Fails with empirical parameters (requires shooting solver)
+## Install
 
-**Conclusion**: Empirical scaling only works near 200 km. For arbitrary altitudes, use the shooting solver.
-
-## 🔬 Mathematical Correctness
-
-All physics and numerical methods have been rigorously verified:
-
-- ✓ Equations of motion (polar coordinates)
-- ✓ Gravity model (μ/r²)
-- ✓ Drag model (½ρCdAv²)
-- ✓ Tsiolkovsky rocket equation
-- ✓ Orbit diagnostics (energy, eccentricity)
-- ✓ Shooting solver (3×3 boundary value problem)
-
-## 🛠️ Installation
+Core package:
 
 ```bash
-# Install core package
-cd packages/apogee-core
-pip install -e .
-
-# Or install dependencies manually
-pip install jax diffrax optimistix scipy numpy
+pip install -e packages/apogee-core
 ```
 
-## 📖 Usage Examples
+## Run: single case (JSON output)
 
-### Example 1: Single Altitude Simulation
+This is the **backend-ready** entry point.
 
-```python
-from scripts.production_simulator import simulate_falcon9_to_orbit
+### Print full JSON (includes full trajectory arrays)
 
-config, traj = simulate_falcon9_to_orbit(
-    h_target=250_000,  # 250 km
-    payload_mass=5000.0,  # 5 ton payload
-    verbose=True
-)
+```bash
+python -u scripts/production_simulator.py --h-target-km 200 --payload-kg 5000
 ```
 
-### Example 2: Shooting Solver for Optimal Parameters
+### Print only summary (no trajectory)
 
-```python
-from apogee_core.shooting import solve_circular_orbit
-from scripts.production_simulator import create_falcon9_vehicle
-from apogee_core import AscentConfig, EarthParams, MissionParams, NumericsParams
-
-vehicle = create_falcon9_vehicle(payload_mass=0.0)
-earth = EarthParams(r_e=6_371_000.0, mu=3.986004418e14, g0=9.80665)
-mission = MissionParams(h_target=300_000, payload_mass=0.0)
-numerics = NumericsParams(
-    h_pitch_over=200.0, theta0=0.0, t_burn2=0.0, t_coast=0.0,
-    v_eps=1e-3, dt0=0.5, rtol=1e-6, atol=1e-6,
-    root_rtol=1e-6, root_atol=1e-3, t_max=2000.0, max_steps=100_000
-)
-
-config = AscentConfig(earth=earth, mission=mission, vehicle=vehicle, numerics=numerics)
-optimal_config, traj = solve_circular_orbit(config)
-
-print(f"Optimal θ₀: {optimal_config.numerics.theta0 * 180/3.14159:.2f}°")
-print(f"Optimal t_coast: {optimal_config.numerics.t_coast:.1f} s")
-print(f"Optimal t_burn2: {optimal_config.numerics.t_burn2:.1f} s")
+```bash
+python -u scripts/production_simulator.py --h-target-km 200 --payload-kg 5000 --no-trajectory
 ```
 
-## 🎓 Technical Details
+The JSON schema is stable and includes:
 
-### Vehicle Configuration (Falcon 9 v1.2 FT)
+- `schema_version`
+- `inputs` (`h_target_km`, `payload_kg`)
+- `optimal_numerics` (`theta0_rad`, `t_coast_s`, `t_burn2_s`, `alpha2_rad`)
+- `summary` (`ecc`, `h_err_m`, `v_err_mps`, `gamma_deg`)
+- `trajectory` (if enabled) — arrays with explicit unit suffixes
 
-- Gross mass: 549,054 kg
-- Stage 1: 7,686 kN thrust, 282s Isp
-- Stage 2: 981 kN thrust, 348s Isp
-- Diameter: 3.7 m
+## Run: sweep with timeout + continuation
 
-### Simulation Phases
+```bash
+python -u scripts/run_simulator.py
+```
 
-1. **Vertical ascent**: Until 200m altitude
-2. **Gravity turn (Stage 1)**: Pitch-over at angle θ₀
-3. **Coast phase**: Duration t_coast (ballistic flight)
-4. **Stage 2 burn**: Duration t_burn2 (circularization)
+This runs a grid sweep of altitudes/payloads with:
 
-### Shooting Solver
+- per-case timeout
+- continuation (warm-starting numerics from the previous converged case)
 
-Solves 3×3 boundary value problem:
+## Notes for future FastAPI + Three.js
 
-- **Controls**: θ₀, t_coast, t_burn2
-- **Targets**: r_final = r_target, v_final = v_circ, γ_final = 0°
-- **Method**: L-BFGS-B with finite difference Jacobian
+- The trajectory is already JSON-serializable via `apogee_core.trajectory_to_dict`.
+- The planar position exported is `pos_m = {x, y, z}` with `z=0`.
+- This is intentionally compatible with adding a **future satellite orbit propagator** and then plotting both rocket ascent and satellite orbit in the same frontend.
 
-## 📚 Documentation
+## Status
 
-- `docs/final_project_nm.pdf`: Complete mathematical formulation
-- `docs/`: Trajectory plots and technical figures
-
-## 🧹 Repository Cleanup
-
-Unnecessary debug/test scripts have been moved to `archive/old_scripts/` and `archive/old_docs/` to maintain a clean production codebase.
-
-## 📄 License
-
-Educational project for numerical methods course (EPN).
-
-## 👤 Author
-
-David Ramos (daxrpm) - Computer Science Student & Backend Developer
+- Simulator and shooting solver are operational.
+- Math report (`docs/nm_final_project.tex`) is aligned to the current implementation.
