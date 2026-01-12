@@ -1,20 +1,16 @@
 [project]
 name = "apogee"
 version = "0.1.0"
-description = "Add your description here"
+description = "Rocket launch and orbital mechanics simulator"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "apogee-core",
-    "diffrax>=0.7.0",
-    "jax>=0.8.2",
-    "optimistix>=0.0.11",
-    "scipy>=1.17.0",
-    "ussa1976>=0.3.4",
-]
+dependencies = []
 
 [tool.uv.workspace]
 members = ["packages/*"]
 
 [tool.uv.sources]
-apogee-core = { workspace = true }
+apogee-physics = { workspace = true }
+apogee-launch = { workspace = true }
+apogee-orbit = { workspace = true }
+apogee-api = { workspace = true }

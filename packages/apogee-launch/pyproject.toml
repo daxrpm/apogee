@@ -1,0 +1,24 @@
+[project]
+name = "apogee-launch"
+version = "0.1.0"
+description = "Rocket launch simulator with Falcon 9 parameters"
+readme = "README.md"
+authors = [
+    { name = "Dax", email = "daxnavarrete@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "apogee-physics",
+    "typer>=0.15.0",
+    "jax",
+]
+
+[project.scripts]
+apogee-launch = "apogee_launch.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.9.21,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+apogee-physics = { workspace = true }
