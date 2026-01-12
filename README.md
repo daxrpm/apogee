@@ -614,6 +614,134 @@ curl -X POST "http://localhost:8000/launch/simulate" \
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
+## Logging System
+
+Apogee implements a comprehensive logging system across all layers, with detailed numerical methods diagnostics for academic analysis and debugging.
+
+### Logging Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    apogee-api (FastAPI)                     │
+│  Level: INFO - HTTP requests, response times, errors        │
+└─────────────────────────────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   apogee-launch (Simulator)                 │
+│  Level: INFO - Simulation start/end, validation, results   │
+└─────────────────────────────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  apogee-physics (Core Engine)               │
+│  shooting.py - DEBUG/INFO: Iterations, convergence, Jacobian│
+│  simulate.py - DEBUG: ODE phases, steps, events            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### CLI Logging Modes
+
+**Normal mode (WARNING level):**
+```bash
+uv run apogee-launch --h-target-km 213 --payload-kg 4082
+# Only warnings and errors
+```
+
+**Verbose mode (INFO level):**
+```bash
+uv run apogee-launch --h-target-km 213 --payload-kg 4082 --verbose
+# Shows simulation progress and results
+```
+
+**Debug mode (DEBUG level):**
+```bash
+uv run apogee-launch --h-target-km 213 --payload-kg 4082 --debug
+# Full numerical methods details: iterations, Jacobian, convergence
+```
+
+### Capturing Logs for Analysis
+
+```bash
+# Save logs to file (stderr contains logs, stdout contains JSON)
+uv run apogee-launch --h-target-km 213 --payload-kg 4082 --debug 2> simulation.log
+
+# View logs in real-time while saving
+uv run apogee-launch --h-target-km 213 --payload-kg 4082 --debug 2>&1 | tee simulation.log
+```
+
+### What Gets Logged
+
+**Shooting Method (`apogee_physics.shooting`):**
+- Multistart strategy: candidate evaluation, feasibility checks
+- Each iteration: residual norm, damping parameter (λ)
+- Jacobian computation: condition number, finite difference steps
+- Broyden updates: rank-1 correction magnitudes
+- Line search: step acceptance/rejection, residual reduction
+- Convergence: final residual, optimal control parameters
+- Failures: bounds violations, fuel depletion, simulation crashes
+
+**ODE Integration (`apogee_physics.simulate`):**
+- Phase transitions: vertical ascent → gravity turn → coast → stage 2 burn
+- Step counts per phase
+- Event detection: pitch-over, stage separation, fuel depletion
+- State diagnostics: mass, altitude, velocity at key events
+
+**Launch Simulator (`apogee_launch`):**
+- Simulation start with target parameters
+- Vehicle configuration: mass budget, burn times
+- Optimization progress
+- Mission success metrics: eccentricity, altitude/velocity errors
+
+**API Layer (`apogee_api`):**
+- HTTP request details
+- Execution time tracking
+- Error handling with stack traces
+
+### Example Debug Output
+
+```
+INFO - Starting launch simulation: h_target=213.0km, payload=4082.0kg
+INFO - Multistart: evaluating 2519 candidate initial guesses
+INFO - Found 1847 feasible candidates, best initial ||F||=2.456e-02
+DEBUG - Attempt 1: initial ||F||=2.456e-02
+DEBUG - Initial: u=[8.00deg, 50.0s, 240.0s, 0.00deg], ||F||=2.456234e-02
+DEBUG - Computing Jacobian via finite differences
+DEBUG - Jacobian: cond(J)=1.23e+02
+DEBUG - Iter 1: ||F||=2.456234e-02, lambda=1.000e-02
+DEBUG - Step accepted: alpha=1.000, ||F||=1.234567e-02 (reduced by 49.7%)
+DEBUG - Broyden rank-1 update: ||s||=1.234e-01, ||y||=5.678e-03
+INFO - Converged in 8 iterations, 45 evaluations
+INFO - Optimal control found:
+INFO -   theta0 = 8.1234 deg
+INFO -   t_coast = 52.34 s
+INFO -   t_burn2 = 245.67 s
+INFO -   alpha2 = 1.2345 deg
+INFO - Mission success:
+INFO -   Eccentricity: 0.000234
+INFO -   Altitude error: 123.4m
+INFO -   Velocity error: 0.567m/s
+```
+
+### Programmatic Configuration
+
+```python
+import logging
+
+# Configure for detailed numerical analysis
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('numerical_analysis.log'),
+        logging.StreamHandler()
+    ]
+)
+
+# Set specific module levels
+logging.getLogger('apogee_physics.shooting').setLevel(logging.DEBUG)
+logging.getLogger('apogee_physics.simulate').setLevel(logging.DEBUG)
+logging.getLogger('apogee_launch').setLevel(logging.INFO)
+```
+
 ## Implementation Details
 
 ### Falcon 9 v1.2 FT Parameters
