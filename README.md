@@ -433,6 +433,9 @@ uv run apogee-launch --h-target-km 200 --payload-kg 5000 \
 
 # Pipe to jq for pretty JSON
 uv run apogee-launch --h-target-km 213 --payload-kg 4082 --no-trajectory | jq
+
+# Generate all plots automatically
+uv run apogee-launch --h-target-km 213 --payload-kg 4082 --plot
 ```
 
 **Required parameters:**
@@ -444,6 +447,29 @@ uv run apogee-launch --h-target-km 213 --payload-kg 4082 --no-trajectory | jq
 - `--t-coast`: Coast duration [s]
 - `--t-burn2`: Stage-2 burn time [s]
 - `--no-trajectory`: Exclude trajectory arrays from output
+- `--plot`: Generate all plots and save to `plots/` directory
+
+#### Plot Generation
+
+The `--plot` flag automatically generates comprehensive visualization of the launch trajectory:
+
+```bash
+# Generate all plots (trajectory, time series, dynamics, mass, comprehensive)
+uv run apogee-launch --h-target-km 213 --payload-kg 4082 --plot
+```
+
+This creates a `plots/` directory with the following files:
+- `trajectory.png`: 2D trajectory with Earth surface and target altitude circle
+- `time.png`: Altitude, velocity, and flight-path angle vs time
+- `dynamics.png`: Mach number and drag force vs time
+- `mass.png`: Vehicle mass profile showing fuel consumption
+- `comprehensive.png`: 6-panel overview with all key parameters
+
+All plots are displayed interactively and saved as high-resolution PNG files. Use `--verbose` to see plot generation progress and `--debug` for detailed file saving information.
+
+<p align="center">
+  <img src="plots/comprehensive.png" alt="Comprehensive Launch Trajectory Visualization" width="800"/>
+</p>
 
 #### JSON Output Schema
 
@@ -533,6 +559,25 @@ print(f"  t_coast = {result.optimal_numerics['t_coast_s']:.2f} s")
 print(f"  t_burn2 = {result.optimal_numerics['t_burn2_s']:.2f} s")
 print(f"  α₂ = {result.optimal_numerics['alpha2_rad']:.4f} rad")
 
+# Generate plots programmatically
+if result.trajectory:
+    from apogee_launch.plotting import plot_comprehensive
+    
+    mission_params = {
+        "h_target_km": 213.0,
+        "payload_kg": 4082.0,
+    }
+    
+    fig = plot_comprehensive(result.trajectory, mission_params)
+    fig.savefig("my_launch_plot.png", dpi=300, bbox_inches='tight')
+    fig.show()
+```
+
+### Manual Trajectory Plotting
+
+For custom plotting, you can access the trajectory data directly:
+
+```python
 # Trajectory data (if included)
 if result.trajectory:
     import matplotlib.pyplot as plt
