@@ -114,11 +114,19 @@ name = "apogee-orbit"
 version = "0.1.0"
 source = { editable = "packages/apogee-orbit" }
 dependencies = [
-    { name = "jax" },
+    { name = "apogee-launch" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "typer" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "jax" }]
+requires-dist = [
+    { name = "apogee-launch", editable = "packages/apogee-launch" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "typer" },
+]
 
 [[package]]
 name = "apogee-physics"
