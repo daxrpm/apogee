@@ -8,6 +8,7 @@ from typing import Optional
 
 import typer
 
+from .plotting import plot_orbit_3d, plot_yaw_profile
 from .simulator import calculate_orbit_yaw, calculate_orbit_yaw_standalone
 
 app = typer.Typer(add_completion=False)
@@ -36,6 +37,7 @@ def main(
     # Logging
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
+    plot: bool = typer.Option(False, "--plot", help="Generate plots and save to plots/ directory"),
 ):
     """Calculate yaw steering angles for orbital solar panel pointing.
     
@@ -130,6 +132,36 @@ def main(
         }
         
         print(json.dumps(output))
+        
+        if plot:
+            try:
+                from pathlib import Path
+                plots_dir = Path("plots")
+                plots_dir.mkdir(exist_ok=True)
+                
+                logger.info(f"Generating plots in {plots_dir}/ directory...")
+                
+                # 1. Yaw Profile
+                fig1 = plot_yaw_profile(output["yaw_steering"], title=f"Orbit Yaw Profile (Sun: {sun_vector})")
+                save_path1 = plots_dir / "orbit_yaw_profile.png"
+                fig1.savefig(save_path1, dpi=300, bbox_inches='tight')
+                logger.info(f"  Saved: {save_path1}")
+                
+                # 2. 3D Orbit
+                fig2 = plot_orbit_3d(result, title=f"3D Orbit & Attitude (Sun: {sun_vector})")
+                save_path2 = plots_dir / "orbit_3d_viz.png"
+                fig2.savefig(save_path2, dpi=300, bbox_inches='tight')
+                logger.info(f"  Saved: {save_path2}")
+                
+                # Show plots
+                import matplotlib.pyplot as plt
+                plt.show()
+                
+            except Exception as e:
+                logger.error(f"Error generating plots: {e}")
+                if debug:
+                    import traceback
+                    logger.debug(traceback.format_exc())
         
     except Exception as e:
         logger.error(f"Simulation failed: {e}")
