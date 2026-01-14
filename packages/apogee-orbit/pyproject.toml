@@ -1,15 +1,20 @@
 [project]
 name = "apogee-orbit"
 version = "0.1.0"
-description = "Orbital propagation and yaw steering (future implementation)"
+description = "Orbital propagation and yaw steering for solar panel optimization"
 readme = "README.md"
 authors = [
     { name = "Dax", email = "daxnavarrete@gmail.com" }
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "jax",
+    "numpy",
+    "typer",
+    "apogee-launch",
 ]
+
+[project.scripts]
+apogee-orbit = "apogee_orbit.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]
