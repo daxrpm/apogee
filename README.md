@@ -20,11 +20,11 @@ Apogee is a comprehensive space mission simulator designed to model the complete
    - Optimization for minimal eccentricity orbits
    - Two-body orbital diagnostics (apoapsis, periapsis, energy, angular momentum)
 
-3. **Orbital Propagation & Attitude Control** (🔄 Future - `apogee-orbit`)
-   - Satellite orbit propagation
-   - Solar position calculations
+3. **Orbital Propagation & Attitude Control** (✅ Implemented - `apogee-orbit`)
+   - Circular equatorial orbit propagation
    - Yaw steering optimization for solar panel orientation
-   - Power generation modeling
+   - Real-time sun vector support for interactive 3D visualization
+   - CLI and REST API endpoints
 
 4. **3D Visualization** (🔄 Future - `frontend`)
    - Real-time launch trajectory visualization
@@ -67,18 +67,25 @@ apogee/
 │   │       ├── falcon9.py      # Falcon 9 v1.2 FT parameters
 │   │       └── cli.py          # Command-line interface (Typer)
 │   │
-│   ├── apogee-orbit/           # Orbital mechanics (placeholder)
+│   ├── apogee-orbit/           # Orbital mechanics & yaw steering
 │   │   └── src/apogee_orbit/
-│   │       └── (future: propagator, solar, attitude)
+│   │       ├── core.py         # EquatorialOrbit class
+│   │       ├── attitude.py     # Yaw steering algorithm
+│   │       ├── simulator.py    # Orbit simulation API
+│   │       ├── plotting.py     # 3D visualization
+│   │       ├── cli.py          # Command-line interface
+│   │       └── types.py        # Data structures
 │   │
 │   └── apogee-api/             # FastAPI REST API
 │       └── src/apogee_api/
 │           ├── main.py         # FastAPI application
 │           ├── routers/        # API endpoints
 │           │   ├── launch.py   # Launch simulation endpoints
+│           │   ├── orbit.py    # Orbit & yaw steering endpoints
 │           │   └── health.py   # Health check
 │           └── schemas/        # Pydantic models
-│               └── launch.py   # Request/response schemas
+│               ├── launch.py   # Launch request/response
+│               └── orbit.py    # Orbit request/response
 │
 ├── docs/                        # Documentation & assets
 │   ├── nm_final_project.tex    # Mathematical formulation (LaTeX)
@@ -252,7 +259,91 @@ $$r_a = a(1 + e), \quad r_p = a(1 - e)$$
 
 **Implementation**: `apogee_physics/orbit.py::orbit_diagnostics`
 
-## Numerical Methods
+### Orbital Mechanics & Yaw Steering (`apogee-orbit`)
+
+After orbital insertion, the satellite enters a **circular equatorial orbit**. The `apogee-orbit` module calculates optimal spacecraft orientation (yaw steering) to maximize solar panel power generation.
+
+<p align="center">
+  <img src="docs/orbit_3d_visualization.png" alt="3D Orbit Visualization with Yaw Steering" width="600"/>
+</p>
+
+#### Assumptions
+
+- **Circular orbit**: $e = 0$ (from launch optimization)
+- **Equatorial orbit**: $i = 0$ (eastward launch from equator)
+- **Two-body dynamics**: Keplerian motion, no perturbations
+
+#### Coordinate Frames
+
+**1. Earth-Centered Inertial (ECI):**
+- $\mathbf{Z}$: North pole
+- $\mathbf{X}$: Vernal equinox (reference for $t=0$)
+- $\mathbf{Y}$: Completes right-hand system
+
+**2. Local-Vertical Local-Horizontal (LVLH):**
+- $\mathbf{z}_L$ (Nadir): $-\mathbf{r}/|\mathbf{r}|$ (towards Earth center)
+- $\mathbf{x}_L$ (Velocity): Along orbital velocity vector
+- $\mathbf{y}_L$ (Cross-track): $\mathbf{z}_L \times \mathbf{x}_L$ (South for prograde equatorial)
+
+#### Satellite State
+
+Position in ECI for circular equatorial orbit:
+
+$$\mathbf{r}(t) = r \begin{bmatrix} \cos(\nu) \\ \sin(\nu) \\ 0 \end{bmatrix}$$
+
+Where:
+- $r = a$ (semi-major axis from launch)
+- $\nu = \nu_0 + n \cdot t$ (true anomaly)
+- $n = \sqrt{\mu/r^3}$ (mean motion)
+- $\nu_0$ (initial anomaly from launch trajectory $\lambda_{final}$)
+
+**Orbital period:**
+
+$$T = \frac{2\pi}{n} = 2\pi \sqrt{\frac{r^3}{\mu}}$$
+
+**Implementation**: `apogee_orbit/core.py::EquatorialOrbit`
+
+#### LVLH Basis Vectors
+
+For equatorial orbit at true anomaly $\nu$:
+
+$$\mathbf{x}_L = \begin{bmatrix} -\sin(\nu) \\ \cos(\nu) \\ 0 \end{bmatrix}, \quad
+\mathbf{y}_L = \begin{bmatrix} 0 \\ 0 \\ -1 \end{bmatrix}, \quad
+\mathbf{z}_L = \begin{bmatrix} -\cos(\nu) \\ -\sin(\nu) \\ 0 \end{bmatrix}$$
+
+**Implementation**: `apogee_orbit/core.py::EquatorialOrbit.get_lvlh_basis`
+
+#### Yaw Steering Algorithm
+
+The sun vector $\mathbf{s}_{ECI}$ (arbitrary unit vector) is transformed to LVLH frame:
+
+$$\mathbf{s}_{local} = \begin{bmatrix} \mathbf{s} \cdot \mathbf{x}_L \\ \mathbf{s} \cdot \mathbf{y}_L \\ \mathbf{s} \cdot \mathbf{z}_L \end{bmatrix}$$
+
+**Yaw angle** (rotation about nadir axis):
+
+$$\psi = \arctan2(s_{y,local}, s_{x,local})$$
+
+This control law rotates the spacecraft body frame such that the sun vector lies in the Body X-Z plane, allowing solar panels (rotating about Body Y) to track the sun optimally.
+
+**Beta angle** (sun elevation above orbital plane):
+
+$$\beta = \arcsin(-s_{y,local})$$
+
+For equatorial orbits with sun in the equatorial plane, $\beta \approx 0$.
+
+**Implementation**: `apogee_orbit/attitude.py::calculate_yaw_steering`
+
+#### Physical Interpretation
+
+| Condition | Yaw Angle | Meaning |
+|-----------|-----------|---------|
+| Sun ahead of velocity | $\psi = 0°$ | Satellite "faces forward" |
+| Sun behind velocity | $\psi = 180°$ | Satellite "faces backward" |
+| Sun at ±90° | $\psi = ±90°$ | Satellite rotates sideways |
+
+The yaw profile exhibits characteristic **180° flips** when the sun crosses the velocity/anti-velocity boundary (at $\nu = 0°$ and $\nu = 180°$ for sun at $+X$).
+
+
 
 ### Shooting Method for Circular Orbit Insertion
 
@@ -471,6 +562,51 @@ All plots are displayed interactively and saved as high-resolution PNG files. Us
   <img src="plots/comprehensive.png" alt="Comprehensive Launch Trajectory Visualization" width="800"/>
 </p>
 
+### Orbit CLI (`apogee-orbit`)
+
+Calculate yaw steering for orbital phase:
+
+```bash
+# Full simulation: launch + orbit (one full orbit)
+uv run apogee-orbit --h-target-km 200 --payload-kg 5000
+
+# Custom sun vector (ECI frame)
+uv run apogee-orbit --h-target-km 200 --payload-kg 5000 --sun-x 0.7 --sun-y 0.7 --sun-z 0
+
+# Simulate 2 orbits with 360 output points
+uv run apogee-orbit --h-target-km 200 --payload-kg 5000 -t 10600 -n 360
+
+# Generate plots (Yaw profile + 3D visualization)
+uv run apogee-orbit --h-target-km 200 --payload-kg 5000 --plot
+
+# Standalone mode (skip launch, use existing orbital params)
+uv run apogee-orbit --r-m 6570000 --nu-initial-deg 15 --plot
+```
+
+**Full simulation parameters:**
+- `--h-target-km`: Target altitude [160, 400] km (triggers launch simulation)
+- `--payload-kg`: Payload mass [0, 10000] kg
+
+**Standalone parameters:**
+- `--r-m`: Orbital radius [m] (skips launch simulation)
+- `--nu-initial-deg`: Initial true anomaly [deg]
+
+**Sun vector:**
+- `--sun-x`, `--sun-y`, `--sun-z`: Sun direction in ECI frame (default: 1, 0, 0)
+
+**Time control:**
+- `-t, --t-duration`: Simulation duration [s] (default: one orbit)
+- `-n, --n-points`: Number of output points (default: 100)
+
+**Output options:**
+- `--plot`: Generate Yaw profile and 3D visualization plots
+- `-v, --verbose`: Enable verbose logging
+- `--debug`: Enable debug logging
+
+<p align="center">
+  <img src="plots/orbit_3d_viz.png" alt="3D Orbit Visualization" width="600"/>
+</p>
+
 #### JSON Output Schema
 
 ```json
@@ -658,6 +794,52 @@ curl -X POST "http://localhost:8000/launch/simulate" \
 **Interactive documentation:**
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+
+**Orbit Trajectory:**
+```bash
+POST http://localhost:8000/orbit/trajectory
+Content-Type: application/json
+
+{
+  "r_m": 6570000,
+  "nu_initial_rad": 0.242,
+  "sun_x": 1.0,
+  "sun_y": 0.0,
+  "sun_z": 0.0,
+  "n_points": 100
+}
+```
+
+Response includes 3D trajectory (`x_m`, `y_m`, `z_m` arrays) and yaw steering profile (`yaw_rad`, `yaw_deg`, `beta_rad`, `beta_deg` arrays).
+
+**Yaw Instant (Fast, <5ms):**
+```bash
+POST http://localhost:8000/orbit/yaw
+Content-Type: application/json
+
+{
+  "r_m": 6570000,
+  "nu_initial_rad": 0.242,
+  "sun_x": 1.0,
+  "sun_y": 0.0,
+  "sun_z": 0.0,
+  "t_s": 0
+}
+```
+
+Response:
+```json
+{
+  "yaw_rad": 3.14159,
+  "yaw_deg": 180.0,
+  "beta_rad": 0.0,
+  "beta_deg": 0.0,
+  "sun_body": [0.24, 0.0, -0.97],
+  "satellite_position": [6378554, 1574466, 0]
+}
+```
+
+Use `/orbit/yaw` for real-time sun vector updates (e.g., when user drags sun in 3D frontend).
 
 ## Logging System
 
@@ -858,13 +1040,13 @@ diameter = 3.7 m         # Vehicle diameter
 
 ## Future Work
 
-### Phase 3: Orbital Propagation (`apogee-orbit`)
+### Phase 3: Orbital Propagation (`apogee-orbit`) ✅ Complete
 
-- [ ] Two-body orbit propagator
-- [ ] J2 perturbation (Earth oblateness)
-- [ ] Solar position ephemeris
-- [ ] Yaw steering optimization for solar panels
-- [ ] Power generation modeling
+- [x] Circular equatorial orbit propagator
+- [x] LVLH coordinate frame transformations
+- [x] Yaw steering optimization for solar panels
+- [x] CLI with plotting support
+- [x] REST API endpoints (trajectory + instant yaw)
 
 ### Phase 4: 3D Visualization (Frontend)
 
