@@ -6,7 +6,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import launch, health
+from .routers import health, launch, orbit
 
 # Configure logging for production
 logging.basicConfig(
@@ -45,6 +45,7 @@ app.add_middleware(
 
 app.include_router(health.router, tags=["health"])
 app.include_router(launch.router, prefix="/launch", tags=["launch"])
+app.include_router(orbit.router, prefix="/orbit", tags=["orbit"])
 
 logger.info("Apogee API ready to accept requests")
 
