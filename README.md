@@ -739,6 +739,70 @@ if result.trajectory:
     plt.show()
 ```
 
+### Frontend Integration Workflow
+
+The API is designed for a **Three.js 3D frontend** with real-time interactivity:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           FRONTEND WORKFLOW                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. User clicks "Launch"                                                    │
+│     │                                                                       │
+│     ▼                                                                       │
+│  ┌─────────────────────────────────────────┐                               │
+│  │  POST /launch/simulate                  │  ← ~20 seconds                │
+│  │  {h_target_km: 200, payload_kg: 5000}   │                               │
+│  └─────────────────────────────────────────┘                               │
+│     │                                                                       │
+│     │  Response contains:                                                   │
+│     │  • trajectory.orbit.semi_major_axis  → r_m                           │
+│     │  • trajectory.lambda_rad[-1]         → nu_initial_rad                │
+│     │                                                                       │
+│     ▼                                                                       │
+│  Frontend renders 3D rocket launch animation                               │
+│     │                                                                       │
+│     ▼                                                                       │
+│  2. Immediately request orbit trajectory                                    │
+│     │                                                                       │
+│     ▼                                                                       │
+│  ┌─────────────────────────────────────────┐                               │
+│  │  POST /orbit/trajectory                 │  ← ~100 milliseconds          │
+│  │  {r_m, nu_initial_rad, sun_x/y/z}       │                               │
+│  └─────────────────────────────────────────┘                               │
+│     │                                                                       │
+│     │  Response contains:                                                   │
+│     │  • trajectory.x_m, y_m, z_m arrays   → 3D orbit path                 │
+│     │  • yaw_steering.yaw_deg array        → satellite orientations        │
+│     │                                                                       │
+│     ▼                                                                       │
+│  Frontend renders 3D orbit with satellite animation                        │
+│     │                                                                       │
+│     ▼                                                                       │
+│  3. User drags sun in 3D scene                                             │
+│     │                                                                       │
+│     ▼                                                                       │
+│  ┌─────────────────────────────────────────┐                               │
+│  │  POST /orbit/yaw                        │  ← <5 milliseconds            │
+│  │  {r_m, nu_initial_rad, sun_x/y/z, t_s}  │    (call on each drag event) │
+│  └─────────────────────────────────────────┘                               │
+│     │                                                                       │
+│     │  Response contains:                                                   │
+│     │  • yaw_deg, beta_deg                 → instant attitude update       │
+│     │  • satellite_position                → current 3D position           │
+│     │                                                                       │
+│     ▼                                                                       │
+│  Frontend updates satellite rotation in real-time                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Design Decisions:**
+- **Stateless API**: Frontend caches `r_m` and `nu_initial_rad` from launch response
+- **Separation of concerns**: Slow launch (~20s) vs fast yaw updates (<5ms)
+- **Real-time ready**: `/orbit/yaw` is optimized for 60 FPS UI interaction
+
 ### REST API (FastAPI)
 
 Start the development server:
