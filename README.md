@@ -97,8 +97,7 @@ apogee/
 │   └── general_earth_orbit.png
 │
 ├── pyproject.toml              # Workspace root configuration
-├── README.md                   # This file
-└── DEVELOPMENT.md              # Development guide
+└── README.md                   # This file
 ```
 
 ### Dependency Flow
