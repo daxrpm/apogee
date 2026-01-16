@@ -1,6 +1,15 @@
-import { useMemo, useRef } from 'react';
-import { useLoader, useFrame } from '@react-three/fiber';
-import { TextureLoader, PlaneGeometry, Mesh, MeshStandardMaterial, DoubleSide } from 'three';
+import { useMemo, useRef, useEffect } from 'react';
+import { useLoader, useFrame, useThree } from '@react-three/fiber';
+import { TextureLoader, PlaneGeometry, Mesh, MeshStandardMaterial, DoubleSide, RepeatWrapping, CanvasTexture } from 'three';
+
+// Available satellite texture options
+export type TextureOption = 'google' | 'bing' | 'google_hybrid';
+
+export const TEXTURE_OPTIONS: { id: TextureOption; label: string; path: string }[] = [
+  { id: 'google', label: 'Google Satellite', path: '/assets/ecuador_color_google_sat.png' },
+  { id: 'bing', label: 'Bing Satellite', path: '/assets/ecuador_color_bing_sat.png' },
+  { id: 'google_hybrid', label: 'Google Hybrid', path: '/assets/ecuador_color_google_sat_hy.png' },
+];
 
 interface EcuadorTerrainProps {
   /** Width of the terrain in world units */
@@ -13,13 +22,14 @@ interface EcuadorTerrainProps {
   maxElevation?: number;
   /** Enable auto-rotation for demo */
   autoRotate?: boolean;
+  /** Selected texture option */
+  textureId?: TextureOption;
 }
 
 /**
  * EcuadorTerrain - 3D terrain mesh using displacement mapping
  * 
  * Uses the heightmap to displace vertices and the color texture for the surface.
- * The heightmap (grayscale) determines elevation: white = high, black = low.
  */
 export function EcuadorTerrain({
   width = 10,
@@ -27,12 +37,25 @@ export function EcuadorTerrain({
   segments = 256,
   maxElevation = 2,
   autoRotate = false,
+  textureId = 'google',
 }: EcuadorTerrainProps) {
   const meshRef = useRef<Mesh>(null);
+  const { invalidate } = useThree();
 
-  // Load textures
-  const colorTexture = useLoader(TextureLoader, '/assets/ecuador_color.png');
+  // Load all textures upfront (avoids Suspense issues on switch)
+  const googleTexture = useLoader(TextureLoader, '/assets/ecuador_color_google_sat.png');
+  const bingTexture = useLoader(TextureLoader, '/assets/ecuador_color_bing_sat.png');
+  const hybridTexture = useLoader(TextureLoader, '/assets/ecuador_color_google_sat_hy.png');
   const heightTexture = useLoader(TextureLoader, '/assets/ecuador_height.png');
+
+  // Select the active texture based on prop
+  const colorTexture = useMemo(() => {
+    switch (textureId) {
+      case 'bing': return bingTexture;
+      case 'google_hybrid': return hybridTexture;
+      default: return googleTexture;
+    }
+  }, [textureId, googleTexture, bingTexture, hybridTexture]);
 
   // Create geometry with displaced vertices
   const geometry = useMemo(() => {
@@ -70,7 +93,19 @@ export function EcuadorTerrain({
       
       // Get pixel value (red channel, 0-255)
       const pixelIndex = (py * canvas.width + px) * 4;
-      const heightValue = pixels[pixelIndex] / 255;
+      const rawValue = pixels[pixelIndex];
+      
+      // Handle heightmap: 
+      // - Pure white (255) = ocean/no-data = flat at 0
+      // - Other values: brighter = higher elevation
+      let heightValue: number;
+      if (rawValue >= 254) {
+        // Ocean or no-data: flat at sea level
+        heightValue = 0;
+      } else {
+        // Land: brighter = higher (normal behavior)
+        heightValue = rawValue / 254;
+      }
       
       // Displace Z (up direction for plane)
       positions[i * 3 + 2] = heightValue * maxElevation;
@@ -82,15 +117,48 @@ export function EcuadorTerrain({
     return geo;
   }, [width, height, segments, maxElevation, heightTexture]);
 
-  // Create material
+  // Create procedural detail texture (noise)
+  const detailTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#808080';
+      ctx.fillRect(0, 0, 512, 512);
+      // Add noise
+      for (let i = 0; i < 50000; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const gray = Math.floor(Math.random() * 50) + 100; // 100-150
+        ctx.fillStyle = `rgba(${gray},${gray},${gray},0.1)`;
+        ctx.fillRect(x, y, 2, 2);
+      }
+    }
+    const tex = new CanvasTexture(canvas);
+    tex.wrapS = RepeatWrapping;
+    tex.wrapT = RepeatWrapping;
+    tex.repeat.set(20, 20); // Repeat 20 times across the terrain
+    return tex;
+  }, []);
+
+  // Create material with detail map - recreate when texture changes
   const material = useMemo(() => {
     return new MeshStandardMaterial({
       map: colorTexture,
+      roughnessMap: detailTexture,
+      bumpMap: detailTexture,
+      bumpScale: 0.05,
       side: DoubleSide,
-      roughness: 0.8,
+      roughness: 0.9,
       metalness: 0.1,
     });
-  }, [colorTexture]);
+  }, [colorTexture, detailTexture]);
+
+  // Force re-render when texture changes
+  useEffect(() => {
+    invalidate();
+  }, [colorTexture, invalidate]);
 
   // Optional auto-rotation for demo
   useFrame((_, delta) => {
