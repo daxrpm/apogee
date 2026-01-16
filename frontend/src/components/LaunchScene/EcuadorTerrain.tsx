@@ -5,7 +5,7 @@ import type { Texture } from 'three';
 
 // ============ TYPES ============
 
-export type RegionId = 'ecuador' | 'quito';
+export type RegionId = 'ecuador' | 'quito' | 'pedernales' | 'launch_beach';
 export type TextureOption = 'google' | 'bing' | 'google_hybrid';
 
 export interface RegionConfig {
@@ -25,6 +25,8 @@ export interface TextureConfig {
 export const REGIONS: RegionConfig[] = [
   { id: 'ecuador', label: '🇪🇨 Ecuador', width: 12, height: 7.22 },
   { id: 'quito', label: '🏙️ Quito', width: 12, height: 7.22 },
+  { id: 'pedernales', label: '🏖️ Pedernales', width: 12, height: 7.21 },
+  { id: 'launch_beach', label: '🚀 Launch Beach', width: 12, height: 7.21 },
 ];
 
 export const TEXTURE_OPTIONS: TextureConfig[] = [
@@ -71,25 +73,44 @@ export function TerrainMesh({
   const quitoBing = useLoader(TextureLoader, '/assets/quito_color_bing_sat.png');
   const quitoHybrid = useLoader(TextureLoader, '/assets/quito_color_google_sat_hy.png');
 
+  // Pedernales textures
+  const pedernalesHeight = useLoader(TextureLoader, '/assets/pedernales_height.png');
+  const pedernalesGoogle = useLoader(TextureLoader, '/assets/pedernales_color_google_sat.png');
+  const pedernalesBing = useLoader(TextureLoader, '/assets/pedernales_color_bing_sat.png');
+  const pedernalesHybrid = useLoader(TextureLoader, '/assets/pedernales_color_google_sat_hy.png');
+
+  // Launch Beach textures
+  const launchBeachHeight = useLoader(TextureLoader, '/assets/launch_beach_height.png');
+  const launchBeachGoogle = useLoader(TextureLoader, '/assets/launch_beach_color_google_sat.png');
+  const launchBeachBing = useLoader(TextureLoader, '/assets/launch_beach_color_bing_sat.png');
+  const launchBeachHybrid = useLoader(TextureLoader, '/assets/launch_beach_color_google_sat_hy.png');
+
   // ===== SELECT ACTIVE TEXTURES BASED ON PROPS =====
   
-  const heightTexture: Texture = regionId === 'quito' ? quitoHeight : ecuadorHeight;
+  const heightTexture: Texture = useMemo(() => {
+    switch (regionId) {
+      case 'quito': return quitoHeight;
+      case 'pedernales': return pedernalesHeight;
+      case 'launch_beach': return launchBeachHeight;
+      default: return ecuadorHeight;
+    }
+  }, [regionId, ecuadorHeight, quitoHeight, pedernalesHeight, launchBeachHeight]);
   
   const colorTexture: Texture = useMemo(() => {
-    if (regionId === 'quito') {
-      switch (textureId) {
-        case 'bing': return quitoBing;
-        case 'google_hybrid': return quitoHybrid;
-        default: return quitoGoogle;
-      }
-    } else {
-      switch (textureId) {
-        case 'bing': return ecuadorBing;
-        case 'google_hybrid': return ecuadorHybrid;
-        default: return ecuadorGoogle;
-      }
-    }
-  }, [regionId, textureId, ecuadorGoogle, ecuadorBing, ecuadorHybrid, quitoGoogle, quitoBing, quitoHybrid]);
+    const textures = {
+      ecuador: { google: ecuadorGoogle, bing: ecuadorBing, google_hybrid: ecuadorHybrid },
+      quito: { google: quitoGoogle, bing: quitoBing, google_hybrid: quitoHybrid },
+      pedernales: { google: pedernalesGoogle, bing: pedernalesBing, google_hybrid: pedernalesHybrid },
+      launch_beach: { google: launchBeachGoogle, bing: launchBeachBing, google_hybrid: launchBeachHybrid },
+    };
+    return textures[regionId]?.[textureId] || ecuadorGoogle;
+  }, [
+    regionId, textureId,
+    ecuadorGoogle, ecuadorBing, ecuadorHybrid,
+    quitoGoogle, quitoBing, quitoHybrid,
+    pedernalesGoogle, pedernalesBing, pedernalesHybrid,
+    launchBeachGoogle, launchBeachBing, launchBeachHybrid,
+  ]);
 
   // Create geometry with displaced vertices
   const geometry = useMemo(() => {
