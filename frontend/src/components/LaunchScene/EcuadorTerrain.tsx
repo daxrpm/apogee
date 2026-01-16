@@ -1,67 +1,100 @@
 import { useMemo, useRef, useEffect } from 'react';
-import { useLoader, useFrame, useThree } from '@react-three/fiber';
+import { useLoader, useThree } from '@react-three/fiber';
 import { TextureLoader, PlaneGeometry, Mesh, MeshStandardMaterial, DoubleSide, RepeatWrapping, CanvasTexture } from 'three';
+import type { Texture } from 'three';
 
-// Available satellite texture options
+// ============ TYPES ============
+
+export type RegionId = 'ecuador' | 'quito';
 export type TextureOption = 'google' | 'bing' | 'google_hybrid';
 
-export const TEXTURE_OPTIONS: { id: TextureOption; label: string; path: string }[] = [
-  { id: 'google', label: 'Google Satellite', path: '/assets/ecuador_color_google_sat.png' },
-  { id: 'bing', label: 'Bing Satellite', path: '/assets/ecuador_color_bing_sat.png' },
-  { id: 'google_hybrid', label: 'Google Hybrid', path: '/assets/ecuador_color_google_sat_hy.png' },
+export interface RegionConfig {
+  id: RegionId;
+  label: string;
+  width: number;
+  height: number;
+}
+
+export interface TextureConfig {
+  id: TextureOption;
+  label: string;
+}
+
+// ============ REGION CONFIGURATIONS ============
+
+export const REGIONS: RegionConfig[] = [
+  { id: 'ecuador', label: '🇪🇨 Ecuador', width: 12, height: 7.22 },
+  { id: 'quito', label: '🏙️ Quito', width: 12, height: 7.22 },
 ];
 
-interface EcuadorTerrainProps {
-  /** Width of the terrain in world units */
-  width?: number;
-  /** Height of the terrain in world units */
-  height?: number;
-  /** Number of segments for detail (higher = more detail) */
+export const TEXTURE_OPTIONS: TextureConfig[] = [
+  { id: 'google', label: 'Google Satellite' },
+  { id: 'bing', label: 'Bing Satellite' },
+  { id: 'google_hybrid', label: 'Google Hybrid' },
+];
+
+// ============ TERRAIN COMPONENT ============
+
+interface TerrainMeshProps {
+  regionId: RegionId;
+  textureId: TextureOption;
   segments?: number;
-  /** Maximum elevation displacement */
   maxElevation?: number;
-  /** Enable auto-rotation for demo */
-  autoRotate?: boolean;
-  /** Selected texture option */
-  textureId?: TextureOption;
 }
 
 /**
- * EcuadorTerrain - 3D terrain mesh using displacement mapping
- * 
- * Uses the heightmap to displace vertices and the color texture for the surface.
+ * TerrainMesh - 3D terrain with multi-region and multi-texture support
  */
-export function EcuadorTerrain({
-  width = 10,
-  height = 10,
+export function TerrainMesh({
+  regionId,
+  textureId,
   segments = 256,
-  maxElevation = 2,
-  autoRotate = false,
-  textureId = 'google',
-}: EcuadorTerrainProps) {
+  maxElevation = 0.8,
+}: TerrainMeshProps) {
   const meshRef = useRef<Mesh>(null);
   const { invalidate } = useThree();
 
-  // Load all textures upfront (avoids Suspense issues on switch)
-  const googleTexture = useLoader(TextureLoader, '/assets/ecuador_color_google_sat.png');
-  const bingTexture = useLoader(TextureLoader, '/assets/ecuador_color_bing_sat.png');
-  const hybridTexture = useLoader(TextureLoader, '/assets/ecuador_color_google_sat_hy.png');
-  const heightTexture = useLoader(TextureLoader, '/assets/ecuador_height.png');
+  // Get region config
+  const region = REGIONS.find(r => r.id === regionId) || REGIONS[0];
 
-  // Select the active texture based on prop
-  const colorTexture = useMemo(() => {
-    switch (textureId) {
-      case 'bing': return bingTexture;
-      case 'google_hybrid': return hybridTexture;
-      default: return googleTexture;
+  // ===== LOAD ALL TEXTURES UPFRONT (hooks must be called unconditionally) =====
+  
+  // Ecuador textures
+  const ecuadorHeight = useLoader(TextureLoader, '/assets/ecuador_height.png');
+  const ecuadorGoogle = useLoader(TextureLoader, '/assets/ecuador_color_google_sat.png');
+  const ecuadorBing = useLoader(TextureLoader, '/assets/ecuador_color_bing_sat.png');
+  const ecuadorHybrid = useLoader(TextureLoader, '/assets/ecuador_color_google_sat_hy.png');
+
+  // Quito textures  
+  const quitoHeight = useLoader(TextureLoader, '/assets/quito_height.png');
+  const quitoGoogle = useLoader(TextureLoader, '/assets/quito_color_google_sat.png');
+  const quitoBing = useLoader(TextureLoader, '/assets/quito_color_bing_sat.png');
+  const quitoHybrid = useLoader(TextureLoader, '/assets/quito_color_google_sat_hy.png');
+
+  // ===== SELECT ACTIVE TEXTURES BASED ON PROPS =====
+  
+  const heightTexture: Texture = regionId === 'quito' ? quitoHeight : ecuadorHeight;
+  
+  const colorTexture: Texture = useMemo(() => {
+    if (regionId === 'quito') {
+      switch (textureId) {
+        case 'bing': return quitoBing;
+        case 'google_hybrid': return quitoHybrid;
+        default: return quitoGoogle;
+      }
+    } else {
+      switch (textureId) {
+        case 'bing': return ecuadorBing;
+        case 'google_hybrid': return ecuadorHybrid;
+        default: return ecuadorGoogle;
+      }
     }
-  }, [textureId, googleTexture, bingTexture, hybridTexture]);
+  }, [regionId, textureId, ecuadorGoogle, ecuadorBing, ecuadorHybrid, quitoGoogle, quitoBing, quitoHybrid]);
 
   // Create geometry with displaced vertices
   const geometry = useMemo(() => {
-    const geo = new PlaneGeometry(width, height, segments, segments);
+    const geo = new PlaneGeometry(region.width, region.height, segments, segments);
     
-    // Get the image data from heightmap
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx || !heightTexture.image) return geo;
@@ -74,40 +107,29 @@ export function EcuadorTerrain({
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const pixels = imageData.data;
 
-    // Displace vertices based on heightmap
     const positions = geo.attributes.position.array as Float32Array;
     const vertexCount = positions.length / 3;
 
     for (let i = 0; i < vertexCount; i++) {
-      // Get UV coordinates for this vertex
       const x = positions[i * 3];
       const y = positions[i * 3 + 1];
       
-      // Convert to UV (0-1 range)
-      const u = (x / width + 0.5);
-      const v = (y / height + 0.5);
+      const u = (x / region.width + 0.5);
+      const v = (y / region.height + 0.5);
       
-      // Get pixel coordinates (flip V because image Y is inverted)
       const px = Math.floor(u * (canvas.width - 1));
       const py = Math.floor((1 - v) * (canvas.height - 1));
       
-      // Get pixel value (red channel, 0-255)
       const pixelIndex = (py * canvas.width + px) * 4;
       const rawValue = pixels[pixelIndex];
       
-      // Handle heightmap: 
-      // - Pure white (255) = ocean/no-data = flat at 0
-      // - Other values: brighter = higher elevation
       let heightValue: number;
       if (rawValue >= 254) {
-        // Ocean or no-data: flat at sea level
         heightValue = 0;
       } else {
-        // Land: brighter = higher (normal behavior)
         heightValue = rawValue / 254;
       }
       
-      // Displace Z (up direction for plane)
       positions[i * 3 + 2] = heightValue * maxElevation;
     }
 
@@ -115,9 +137,9 @@ export function EcuadorTerrain({
     geo.computeVertexNormals();
 
     return geo;
-  }, [width, height, segments, maxElevation, heightTexture]);
+  }, [region.width, region.height, segments, maxElevation, heightTexture]);
 
-  // Create procedural detail texture (noise)
+  // Create procedural detail texture
   const detailTexture = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
@@ -126,11 +148,10 @@ export function EcuadorTerrain({
     if (ctx) {
       ctx.fillStyle = '#808080';
       ctx.fillRect(0, 0, 512, 512);
-      // Add noise
       for (let i = 0; i < 50000; i++) {
         const x = Math.random() * 512;
         const y = Math.random() * 512;
-        const gray = Math.floor(Math.random() * 50) + 100; // 100-150
+        const gray = Math.floor(Math.random() * 50) + 100;
         ctx.fillStyle = `rgba(${gray},${gray},${gray},0.1)`;
         ctx.fillRect(x, y, 2, 2);
       }
@@ -138,11 +159,11 @@ export function EcuadorTerrain({
     const tex = new CanvasTexture(canvas);
     tex.wrapS = RepeatWrapping;
     tex.wrapT = RepeatWrapping;
-    tex.repeat.set(20, 20); // Repeat 20 times across the terrain
+    tex.repeat.set(20, 20);
     return tex;
   }, []);
 
-  // Create material with detail map - recreate when texture changes
+  // Create material
   const material = useMemo(() => {
     return new MeshStandardMaterial({
       map: colorTexture,
@@ -155,27 +176,41 @@ export function EcuadorTerrain({
     });
   }, [colorTexture, detailTexture]);
 
-  // Force re-render when texture changes
   useEffect(() => {
     invalidate();
-  }, [colorTexture, invalidate]);
-
-  // Optional auto-rotation for demo
-  useFrame((_, delta) => {
-    if (autoRotate && meshRef.current) {
-      meshRef.current.rotation.z += delta * 0.1;
-    }
-  });
+  }, [colorTexture, heightTexture, invalidate]);
 
   return (
     <mesh
       ref={meshRef}
       geometry={geometry}
       material={material}
-      rotation={[-Math.PI / 2, 0, 0]} // Lay flat (XZ plane)
+      rotation={[-Math.PI / 2, 0, 0]}
       position={[0, 0, 0]}
       castShadow
       receiveShadow
+    />
+  );
+}
+
+// ============ LEGACY EXPORT =============
+
+interface EcuadorTerrainProps {
+  width?: number;
+  height?: number;
+  segments?: number;
+  maxElevation?: number;
+  autoRotate?: boolean;
+  textureId?: TextureOption;
+}
+
+export function EcuadorTerrain(props: EcuadorTerrainProps) {
+  return (
+    <TerrainMesh
+      regionId="ecuador"
+      textureId={props.textureId || 'google'}
+      segments={props.segments}
+      maxElevation={props.maxElevation}
     />
   );
 }
