@@ -157,7 +157,35 @@ export async function simulateLaunch(params: LaunchParams): Promise<LaunchRespon
 
     if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Launch simulation failed: ${response.status} - ${errorText}`);
+        
+        // Try to parse JSON error from backend
+        try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.detail) {
+                // Parse shooting convergence error format
+                const detail = errorJson.detail;
+                const match = detail.match(/Shooting did not converge \(evals=(\d+)\/(\d+), u=\[([^\]]+)\], \|\|F\|\|=([\d.]+), F=\[([^\]]+)\]\)/);
+                
+                if (match) {
+                    const error = new Error('CONVERGENCE_ERROR') as Error & { convergenceData: object };
+                    error.convergenceData = {
+                        evaluations: `${match[1]}/${match[2]}`,
+                        parameters: match[3].split(',').map((v: string) => parseFloat(v.trim())),
+                        residualNorm: parseFloat(match[4]),
+                        residuals: match[5].split(',').map((v: string) => parseFloat(v.trim())),
+                    };
+                    throw error;
+                }
+                
+                throw new Error(detail);
+            }
+            throw new Error(errorText);
+        } catch (parseError) {
+            if (parseError instanceof Error && parseError.message === 'CONVERGENCE_ERROR') {
+                throw parseError;
+            }
+            throw new Error(`Error ${response.status}: ${errorText}`);
+        }
     }
 
     return response.json();

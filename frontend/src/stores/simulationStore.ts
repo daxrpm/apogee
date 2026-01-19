@@ -3,6 +3,13 @@ import { simulateLaunch, type LaunchResponse, type LaunchParams } from '../servi
 
 export type SceneType = 'ecuador' | 'quito' | 'pedernales' | 'beach' | 'launch' | 'orbit';
 
+export interface ConvergenceError {
+  evaluations: string;
+  parameters: number[];
+  residualNorm: number;
+  residuals: number[];
+}
+
 interface SimulationState {
   // Navigation
   currentScene: SceneType;
@@ -17,6 +24,7 @@ interface SimulationState {
   // API state
   isLoading: boolean;
   error: string | null;
+  errorData: ConvergenceError | null;
   launchData: LaunchResponse | null;
   
   // Animation state
@@ -65,6 +73,7 @@ const initialState: SimulationState = {
   tBurn2S: null,
   isLoading: false,
   error: null,
+  errorData: null,
   launchData: null,
   animationTime: 0,
   isPlaying: false,
@@ -117,14 +126,25 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         animationTime: 0,
       });
     } catch (error) {
-      set({ 
-        error: error instanceof Error ? error.message : 'Simulation failed',
-        isLoading: false,
-      });
+      // Check for convergence error with structured data
+      const err = error as Error & { convergenceData?: ConvergenceError };
+      if (err.message === 'CONVERGENCE_ERROR' && err.convergenceData) {
+        set({ 
+          error: 'Simulation did not converge',
+          errorData: err.convergenceData,
+          isLoading: false,
+        });
+      } else {
+        set({ 
+          error: err.message || 'Simulation failed',
+          errorData: null,
+          isLoading: false,
+        });
+      }
     }
   },
   
-  clearError: () => set({ error: null }),
+  clearError: () => set({ error: null, errorData: null }),
   
   // Animation
   setAnimationTime: (time) => set({ animationTime: time }),

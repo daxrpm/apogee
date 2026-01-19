@@ -12,6 +12,7 @@ export function ControlPanel() {
     tBurn2S,
     isLoading,
     error,
+    errorData,
     setHTargetKm,
     setPayloadKg,
     setTheta0Deg,
@@ -136,15 +137,37 @@ export function ControlPanel() {
 
           {/* Error Display */}
           {error && (
-            <div style={styles.error}>
-              <span>⚠️ {error}</span>
-              <button 
-                type="button" 
-                onClick={clearError}
-                style={styles.errorClose}
-              >
-                ×
-              </button>
+            <div style={styles.errorContainer}>
+              <div style={styles.errorHeader}>
+                <span>⚠️ {error}</span>
+                <button 
+                  type="button" 
+                  onClick={clearError}
+                  style={styles.errorClose}
+                >
+                  ×
+                </button>
+              </div>
+              {errorData && (
+                <div style={styles.errorDetails}>
+                  <div style={styles.errorRow}>
+                    <span style={styles.errorLabel}>Evaluations:</span>
+                    <span>{errorData.evaluations}</span>
+                  </div>
+                  <div style={styles.errorRow}>
+                    <span style={styles.errorLabel}>Residual ||F||:</span>
+                    <span>{errorData.residualNorm.toExponential(4)}</span>
+                  </div>
+                  <div style={styles.errorRow}>
+                    <span style={styles.errorLabel}>Parameters:</span>
+                  </div>
+                  <div style={styles.errorParams}>
+                    <span>θ₀: {(errorData.parameters[0] * 180 / Math.PI).toFixed(2)}°</span>
+                    <span>t_coast: {errorData.parameters[2].toFixed(1)}s</span>
+                    <span>t_burn2: {errorData.parameters[3].toFixed(1)}s</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -265,16 +288,40 @@ const styles: Record<string, React.CSSProperties> = {
     paddingLeft: '12px',
     borderLeft: '2px solid rgba(255, 255, 255, 0.1)',
   },
-  error: {
+  errorContainer: {
     background: 'rgba(255, 100, 100, 0.15)',
     border: '1px solid rgba(255, 100, 100, 0.3)',
     borderRadius: '2px',
     padding: '10px 12px',
     fontSize: '11px',
     color: '#ff6b6b',
+  },
+  errorHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: '8px',
+  },
+  errorDetails: {
+    borderTop: '1px solid rgba(255, 100, 100, 0.2)',
+    paddingTop: '8px',
+    fontSize: '10px',
+  },
+  errorRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginBottom: '4px',
+  },
+  errorLabel: {
+    color: 'rgba(255, 150, 150, 0.7)',
+  },
+  errorParams: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    paddingLeft: '8px',
+    color: 'rgba(255, 200, 200, 0.8)',
+    fontFamily: "'Roboto Mono', monospace",
   },
   errorClose: {
     background: 'none',
