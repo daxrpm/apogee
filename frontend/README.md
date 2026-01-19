@@ -1,73 +1,78 @@
-# React + TypeScript + Vite
+# Apogee Frontend 🚀
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A high-fidelity 3D visualization platform for rocket launch simulations, built with React, Three.js, and React Three Fiber.
 
-Currently, two official plugins are available:
+![Beach Scene](https://raw.githubusercontent.com/daxrpm/apogee/main/frontend/public/screenshots/beach-scene-preview.png)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Overview 🌟
 
-## React Compiler
+**Apogee Frontend** provides an immersive, realistic 3D environment to visualize rocket launches from Pedernales, Ecuador. It features a geographically accurate beach scene, dynamic ocean water, atmospheric sky simulation, and seamless integration with the `apogee-launch` backend for trajectory data.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Key Features
+- **Realistic 3D Environment**: High-quality 3D assets for vegetation, mountains, and launch infrastructure.
+- **Dynamic Atmosphere**: Proper Rayleigh scattering, sun positioning, and volumetric clouds.
+- **Interactive Ocean**: Shader-based water simulation with reflections and wave dynamics.
+- **Physics Integration**: Ready-to-connect API hooks for visualized flight trajectories.
+- **Responsive Controls**: Orbit controls, camera presets, and real-time parameter adjustments.
 
-## Expanding the ESLint configuration
+## Technology Stack 💻
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Framework**: [React](https://react.dev/) + [Vite](https://vitejs.dev/)
+- **Language**: [TypeScript](https://www.typescriptlang.org/)
+- **3D Engine**: [Three.js](https://threejs.org/) via [React Three Fiber](https://docs.pmnd.rs/react-three-fiber)
+- **State Management**: React Hooks (custom `useLaunch` hook)
+- **Styling**: Modular CSS + Three.js Materials
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Project Structure 📂
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+src/
+├── components/
+│   ├── BeachScene/       # Main 3D Environment
+│   │   ├── BeachScene.tsx    # Scene composition & lighting
+│   │   ├── Water.tsx         # Ocean & Beach procedural generation
+│   │   ├── Sky.tsx           # Atmosphere & Clouds
+│   │   ├── Vegetation.tsx    # Palm forests & Seagulls
+│   │   └── LaunchPad.tsx     # Rocket & Pad models
+│   └── LaunchScene/      # (Optional) Terrain map visualization
+├── hooks/
+│   └── useLaunch.ts      # API integration hook for backend
+├── services/
+│   └── api.ts            # Axios configuration & types
+└── App.tsx               # Main entry with scene routing
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Setup & Installation 🛠️
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/daxrpm/apogee.git
+    cd apogee/frontend
+    ```
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+2.  **Install dependencies**
+    ```bash
+    npm install
+    ```
+
+3.  **Run the development server**
+    ```bash
+    npm run dev
+    ```
+
+## Backend Integration 🔗
+
+This frontend is designed to consume trajectory data from the `apogee-launch` Python backend.
+
+### Status: Paused
+The integration is fully implemented in `src/hooks/useLaunch.ts` but is currently paused to focus on visual fidelity.
+
+### Future Roadmap
+1.  **Real-time WebSocket Connection**: Stream telemetry data during launch.
+2.  **Trajectory Visualization**: Draw flight paths using `Three.js` lines based on `(x, y, z)` tuples from the API.
+3.  **Stage Separation**: Animate variable mass and stage decoupling events.
+
+## Best Practices 🏆
+- **Component Modularity**: Each 3D element (Sky, Water, Trees) is an isolated, reusable component.
+- **Asset Preloading**: Heavy GLB models are preloaded to prevent pop-in.
+- **Performance**: Shadows and poly-counts are optimized for browser execution.
