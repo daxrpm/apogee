@@ -1,4 +1,4 @@
-import { Suspense, useState } from 'react';
+import { Suspense, useState, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stats, Loader } from '@react-three/drei';
 import { Vector3 } from 'three';
@@ -9,7 +9,7 @@ import { useLaunch } from '../../hooks/useLaunch';
 // Beach scene components
 import { OceanWater, BeachSand, RealisticMountain } from './Water';
 import { DaytimeSky, DaytimeLight, DaytimeClouds } from './Sky';
-import { LaunchPad } from './LaunchPad';
+import { Falcon9Rocket, type Falcon9RocketRef } from './Falcon9Rocket';
 import { PalmForest, Seagulls } from './Vegetation';
 
 interface BeachSceneProps {
@@ -31,6 +31,9 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
   // Launch pad controls
   const [padScale, setPadScale] = useState(1);
   const [padPosition, setPadPosition] = useState<[number, number, number]>([0, 2, 0]);
+  
+  // Falcon 9 rocket reference for stage separation
+  const rocketRef = useRef<Falcon9RocketRef>(null);
   
   // Backend Launch Integration
   const { launch, loading, error, data: launchData } = useLaunch();
@@ -105,13 +108,36 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
           depth={6000}   // Longer: 2km North-South
         />
 
-        {/* Launch Pad in center of beach */}
+        {/* Falcon 9 Rocket on beach */}
         <Suspense fallback={null}>
           {showModels && (
-            <LaunchPad 
-              position={padPosition}
+            <Falcon9Rocket
+              ref={rocketRef}
+              position={[padPosition[0], padPosition[1], padPosition[2]]}
               scale={padScale}
-              rotation={[0, Math.PI/2, 0]}
+              /*
+               * ROCKET ORIENTATION REFERENCE:
+               * =============================
+               * The Falcon 9 GLB model is oriented with nose pointing in +Y direction (up).
+               * 
+               * rotation={[X, Y, Z]} in radians:
+               * - X rotation: Pitch (tilt forward/backward)
+               * - Y rotation: Yaw (rotate around vertical axis) 
+               * - Z rotation: Roll
+               * 
+               * VERTICAL (launch position): rotation={[0, 0, 0]}
+               *   - Nose points UP (+Y)
+               *   - This is γ = 90° (flight-path angle from horizontal)
+               * 
+               * HORIZONTAL (orbital insertion): rotation={[0, 0, -Math.PI/2]}
+               *   - Nose points EAST (+X in scene, which is toward mountains)
+               *   - This is γ = 0° (flight-path angle)
+               * 
+               * During launch animation:
+               *   rotation={[0, 0, -(Math.PI/2 - gamma_rad)]}
+               *   where gamma_rad comes from API trajectory.gamma_rad
+               */
+              rotation={[0, 0, 0]}  // VERTICAL - nose pointing UP
             />
           )}
         </Suspense>
