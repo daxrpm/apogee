@@ -1,6 +1,6 @@
 import { Suspense, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Stats, Loader } from '@react-three/drei';
+import { Stats, Loader } from '@react-three/drei';
 import { Vector3 } from 'three';
 
 // Components
@@ -10,6 +10,9 @@ import { LaunchPad } from './LaunchPad';
 import { Falcon9Rocket, type Falcon9RocketRef } from './Falcon9Rocket';
 import { PalmForest, Seagulls } from './Vegetation';
 import { ControlPanel } from './ControlPanel';
+import { LaunchAnimation } from '../Launch/LaunchAnimation';
+import { RocketCamera } from '../Launch/RocketCamera';
+import { Telemetry } from '../Launch/Telemetry';
 
 // Store
 import { useSimulationStore } from '../../stores/simulationStore';
@@ -31,17 +34,19 @@ interface BeachSceneProps {
  */
 export function BeachScene({ showStats = false, showModels = true }: BeachSceneProps) {
   const rocketRef = useRef<Falcon9RocketRef>(null);
-  const { currentScene } = useSimulationStore();
+  const { currentScene, isPlaying } = useSimulationStore();
   
   // Fixed pad position and scale
   const padPosition: [number, number, number] = [0, 2, 0];
   const padScale = 1;
+  const rocketScale = padScale * 0.005;
   
   // Sun position for daytime lighting
   const sunDirection = new Vector3(50, 120, -30);
   
-  // Only show control panel in beach scene (before launch)
+  // Show control panel only before launch
   const showControlPanel = currentScene === 'beach';
+  const isLaunching = currentScene === 'launch' && isPlaying;
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#87ceeb' }}>
@@ -51,7 +56,7 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
           position: [0, 60, 250],  // Further back and higher
           fov: 55,
           near: 1,
-          far: 20000,  // Deep visibility for distant mountains and horizon
+          far: 150000,  // Extended for high altitude trajectories
         }}
         gl={{
           antialias: false,  // Disable for performance
@@ -71,15 +76,8 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
           intensity={2.0}
         />
 
-        {/* Camera Controls */}
-        <OrbitControls
-          enableDamping
-          dampingFactor={0.05}
-          minDistance={20}
-          maxDistance={800}
-          maxPolarAngle={Math.PI / 2.05}
-          target={[0, 10, 0]}
-        />
+        {/* Camera Controls - follows rocket during launch */}
+        <RocketCamera />
 
         {/* ====== OCEAN (WEST side, negative X) ====== */}
         {/* Massive ocean plane extending to horizon on the West */}
@@ -100,19 +98,31 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
         <Suspense fallback={null}>
           {showModels && (
             <group>
-              {/* Launch pad structure (rocket meshes filtered out) */}
+              {/* Launch pad structure */}
               <LaunchPad 
                 position={padPosition}
                 scale={padScale}
                 rotation={[0, Math.PI/2, 0]}
               />
-              {/* Falcon 9 Rocket: vertical=[0,0,0], horizontal=[0,0,-PI/2] */}
-              <Falcon9Rocket
-                ref={rocketRef}
-                position={[padPosition[0]-0.5, padPosition[1] , padPosition[2]]}
-                scale={padScale * 0.005}  // Rocket is ~6x smaller than pad
-                rotation={[0, 0, 0]}  // VERTICAL - nose pointing UP
-              />
+              
+              {/* Falcon 9 Rocket with animation wrapper */}
+              {isLaunching ? (
+                // During launch: animate rocket following trajectory
+                <LaunchAnimation timeScale={3}>
+                  <Falcon9Rocket
+                    ref={rocketRef}
+                    scale={rocketScale}
+                  />
+                </LaunchAnimation>
+              ) : (
+                // Pre-launch: static rocket on pad
+                <Falcon9Rocket
+                  ref={rocketRef}
+                  position={[padPosition[0] - 0.5, padPosition[1], padPosition[2]]}
+                  scale={rocketScale}
+                  rotation={[0, 0, 0]}  // VERTICAL - nose UP
+                />
+              )}
             </group>
           )}
         </Suspense>
@@ -171,6 +181,9 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
 
       {/* Launch Control Panel */}
       {showControlPanel && <ControlPanel />}
+
+      {/* Telemetry HUD during launch */}
+      <Telemetry />
     </div>
   );
 }

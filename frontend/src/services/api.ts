@@ -92,6 +92,15 @@ export interface TrajectoryData {
         y: number[];
         z: number[];
     };
+
+    /** Mass in kg (optional) */
+    m_kg?: number[];
+
+    /** Dynamic pressure in Pa (optional) */
+    q_pa?: number[];
+
+    /** Mach number (optional) */
+    mach?: number[];
 }
 
 /**

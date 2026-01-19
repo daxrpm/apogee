@@ -85,7 +85,7 @@ export function DaytimeSky({ sunPosition = new Vector3(100, 80, -50) }: DaytimeS
 
   return (
     <mesh material={material}>
-      <sphereGeometry args={[5000, 64, 64]} />
+      <sphereGeometry args={[100000, 64, 64]} />
     </mesh>
   );
 }
