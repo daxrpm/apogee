@@ -6,13 +6,7 @@
  * @module App
  */
 
-import { useState } from 'react';
-import { LaunchScene } from './components/LaunchScene';
 import { BeachScene } from './components/BeachScene';
-
-// ============ TYPES ============
-
-type SceneMode = 'terrain' | 'beach';
 
 // ============ STYLES ============
 
@@ -71,35 +65,9 @@ const styles = {
  * - Stage separation and landing simulation
  */
 function App() {
-  const [sceneMode, setSceneMode] = useState<SceneMode>('beach');
-
   return (
     <div style={styles.container}>
-      {/* Scene Renderer */}
-      {sceneMode === 'terrain' && <LaunchScene showStats={true} showGrid={true} />}
-      {sceneMode === 'beach' && <BeachScene showStats={true} showModels={true} />}
-
-      {/* Scene Mode Selector */}
-      <div style={styles.modeSwitcher}>
-        <button
-          onClick={() => setSceneMode('terrain')}
-          style={{
-            ...styles.modeButton,
-            ...(sceneMode === 'terrain' ? styles.activeTerrain : styles.inactive),
-          }}
-        >
-          🗺️ Terrain Maps
-        </button>
-        <button
-          onClick={() => setSceneMode('beach')}
-          style={{
-            ...styles.modeButton,
-            ...(sceneMode === 'beach' ? styles.activeBeach : styles.inactive),
-          }}
-        >
-          🏖️ Launch Beach
-        </button>
-      </div>
+      <BeachScene showStats={true} showModels={true} />
     </div>
   );
 }
