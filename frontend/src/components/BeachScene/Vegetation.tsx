@@ -136,10 +136,6 @@ export function PalmForest({
 
 // ============ SEAGULLS ============
 
-
-
-// ============ SEAGULLS ============
-
 interface SeagullsProps {
   count?: number;
 }

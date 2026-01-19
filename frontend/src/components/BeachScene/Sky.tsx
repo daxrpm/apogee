@@ -141,9 +141,9 @@ export function DaytimeClouds({ count = 20 }: CloudsProps) {
   const clouds = useMemo(() => {
     const items = [];
     for (let i = 0; i < count; i++) {
-      const x = (Math.random() - 0.5) * 400;
-      const y = 50 + Math.random() * 40;
-      const z = -150 + Math.random() * 100;
+      const x = (Math.random() - 0.5) * 800; // Wider spread
+      const y = 300 + Math.random() * 350;   // Much higher in sky
+      const z = -500 + Math.random() * 100;  // Further back range
       const scaleX = 25 + Math.random() * 50;
       const scaleY = 8 + Math.random() * 12;
       const scaleZ = 25 + Math.random() * 40;
@@ -154,7 +154,21 @@ export function DaytimeClouds({ count = 20 }: CloudsProps) {
 
   return (
     <group>
-      
+      {clouds.map((cloud) => (
+        <mesh 
+          key={cloud.key} 
+          position={[cloud.x, cloud.y, cloud.z]}
+          scale={[cloud.scaleX, cloud.scaleY, cloud.scaleZ]}
+        >
+          <sphereGeometry args={[1, 8, 8]} />
+          <meshStandardMaterial 
+            color="#ffffff" 
+            transparent 
+            opacity={0.6} 
+            roughness={1}
+          />
+        </mesh>
+      ))}
     </group>
   );
 }

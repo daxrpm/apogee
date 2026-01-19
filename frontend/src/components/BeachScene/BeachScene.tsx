@@ -3,6 +3,9 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stats, Loader } from '@react-three/drei';
 import { Vector3 } from 'three';
 
+// Hooks
+import { useLaunch } from '../../hooks/useLaunch';
+
 // Beach scene components
 import { OceanWater, BeachSand, RealisticMountain } from './Water';
 import { DaytimeSky, DaytimeLight, DaytimeClouds } from './Sky';
@@ -13,8 +16,6 @@ interface BeachSceneProps {
   showStats?: boolean;
   showModels?: boolean;
 }
-
-import { useLaunch } from '../../hooks/useLaunch';
 
 /**
  * BeachScene - Realistic 3D beach environment for rocket launch
