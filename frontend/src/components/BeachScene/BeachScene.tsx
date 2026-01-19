@@ -1,16 +1,18 @@
-import { Suspense, useState, useRef } from 'react';
+import { Suspense, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stats, Loader } from '@react-three/drei';
 import { Vector3 } from 'three';
 
-// Hooks
-import { useLaunch } from '../../hooks/useLaunch';
-
-// Beach scene components
+// Components
 import { OceanWater, BeachSand, RealisticMountain } from './Water';
 import { DaytimeSky, DaytimeLight, DaytimeClouds } from './Sky';
+import { LaunchPad } from './LaunchPad';
 import { Falcon9Rocket, type Falcon9RocketRef } from './Falcon9Rocket';
 import { PalmForest, Seagulls } from './Vegetation';
+import { ControlPanel } from './ControlPanel';
+
+// Store
+import { useSimulationStore } from '../../stores/simulationStore';
 
 interface BeachSceneProps {
   showStats?: boolean;
@@ -28,32 +30,18 @@ interface BeachSceneProps {
  * Camera looks from south, with west to the left and east to the right
  */
 export function BeachScene({ showStats = false, showModels = true }: BeachSceneProps) {
-  // Launch pad controls
-  const [padScale, setPadScale] = useState(1);
-  const [padPosition, setPadPosition] = useState<[number, number, number]>([0, 2, 0]);
-  
-  // Falcon 9 rocket reference for stage separation
   const rocketRef = useRef<Falcon9RocketRef>(null);
+  const { currentScene } = useSimulationStore();
   
-  // Backend Launch Integration
-  const { launch, loading, error, data: launchData } = useLaunch();
-
-  const handleLaunch = async () => {
-    console.log("Initiating launch sequence...");
-    const result = await launch({
-      h_target_km: 200,
-      payload_kg: 5000,
-      include_trajectory: true
-    });
-    
-    if (result) {
-      console.log("Launch Data Received:", result);
-      // Future: Trigger animation here
-    }
-  };
+  // Fixed pad position and scale
+  const padPosition: [number, number, number] = [0, 2, 0];
+  const padScale = 1;
   
-  // Sun position for daytime lighting (high in sky for rocket tracking)
+  // Sun position for daytime lighting
   const sunDirection = new Vector3(50, 120, -30);
+  
+  // Only show control panel in beach scene (before launch)
+  const showControlPanel = currentScene === 'beach';
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#87ceeb' }}>
@@ -108,37 +96,24 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
           depth={6000}   // Longer: 2km North-South
         />
 
-        {/* Falcon 9 Rocket on beach */}
+        {/* Launch Pad + Falcon 9 Rocket */}
         <Suspense fallback={null}>
           {showModels && (
-            <Falcon9Rocket
-              ref={rocketRef}
-              position={[padPosition[0], padPosition[1], padPosition[2]]}
-              scale={padScale}
-              /*
-               * ROCKET ORIENTATION REFERENCE:
-               * =============================
-               * The Falcon 9 GLB model is oriented with nose pointing in +Y direction (up).
-               * 
-               * rotation={[X, Y, Z]} in radians:
-               * - X rotation: Pitch (tilt forward/backward)
-               * - Y rotation: Yaw (rotate around vertical axis) 
-               * - Z rotation: Roll
-               * 
-               * VERTICAL (launch position): rotation={[0, 0, 0]}
-               *   - Nose points UP (+Y)
-               *   - This is γ = 90° (flight-path angle from horizontal)
-               * 
-               * HORIZONTAL (orbital insertion): rotation={[0, 0, -Math.PI/2]}
-               *   - Nose points EAST (+X in scene, which is toward mountains)
-               *   - This is γ = 0° (flight-path angle)
-               * 
-               * During launch animation:
-               *   rotation={[0, 0, -(Math.PI/2 - gamma_rad)]}
-               *   where gamma_rad comes from API trajectory.gamma_rad
-               */
-              rotation={[0, 0, 0]}  // VERTICAL - nose pointing UP
-            />
+            <group>
+              {/* Launch pad structure (rocket meshes filtered out) */}
+              <LaunchPad 
+                position={padPosition}
+                scale={padScale}
+                rotation={[0, Math.PI/2, 0]}
+              />
+              {/* Falcon 9 Rocket: vertical=[0,0,0], horizontal=[0,0,-PI/2] */}
+              <Falcon9Rocket
+                ref={rocketRef}
+                position={[padPosition[0]-0.5, padPosition[1] , padPosition[2]]}
+                scale={padScale * 0.005}  // Rocket is ~6x smaller than pad
+                rotation={[0, 0, 0]}  // VERTICAL - nose pointing UP
+              />
+            </group>
           )}
         </Suspense>
 
@@ -194,105 +169,8 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
       {/* Loading indicator */}
       <Loader />
 
-      {/* Control Panel */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 20,
-          right: 20,
-          color: 'white',
-          fontFamily: 'system-ui, sans-serif',
-          fontSize: '14px',
-          background: 'rgba(0, 0, 0, 0.8)',
-          padding: '16px 20px',
-          borderRadius: '12px',
-          backdropFilter: 'blur(10px)',
-          minWidth: '200px',
-        }}
-      >
-        <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#87ceeb' }}>
-          🚀 Pedernales Launch Site
-        </h3>
-        
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ fontSize: '12px', opacity: 0.7, display: 'block', marginBottom: '4px' }}>
-            Rocket Scale: {padScale.toFixed(2)}
-          </label>
-          <input
-            type="range"
-            min="0.5"
-            max="2.0"
-            step="0.1"
-            value={padScale}
-            onChange={(e) => setPadScale(parseFloat(e.target.value))}
-            style={{ width: '100%', accentColor: '#87ceeb' }}
-          />
-        </div>
-
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ fontSize: '12px', opacity: 0.7, display: 'block', marginBottom: '4px' }}>
-            Height: {padPosition[1].toFixed(0)}m
-          </label>
-          <input
-            type="range"
-            min="-5"
-            max="15"
-            step="1"
-            value={padPosition[1]}
-            onChange={(e) => setPadPosition([padPosition[0], parseFloat(e.target.value), padPosition[2]])}
-            style={{ width: '100%', accentColor: '#87ceeb' }}
-          />
-        </div>
-
-        <p style={{ margin: '12px 0 0 0', fontSize: '11px', opacity: 0.5 }}>
-          🌴 West: Ocean • 🏔️ East: Mountains
-        </p>
-      </div>
-
-      {/* Info Overlay */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 20,
-          left: 20,
-          color: 'white',
-          fontFamily: 'system-ui, sans-serif',
-          fontSize: '13px',
-          background: 'rgba(0, 0, 0, 0.7)',
-          padding: '12px 16px',
-          borderRadius: '8px',
-          backdropFilter: 'blur(10px)',
-        }}
-      >
-        <p style={{ margin: '0 0 8px 0', opacity: 0.9 }}>
-          🇪🇨 Pedernales, Ecuador • Ocean West • Mountains East
-        </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button
-            onClick={() => handleLaunch()}
-            disabled={loading}
-            style={{
-              background: loading ? '#666' : '#e04006',
-              border: 'none',
-              borderRadius: '4px',
-              color: 'white',
-              padding: '6px 12px',
-              cursor: loading ? 'wait' : 'pointer',
-              fontWeight: 'bold',
-              fontSize: '12px'
-            }}
-          >
-            {loading ? 'CALCULATING...' : 'LAUNCH SIMULATION'}
-          </button>
-          
-          {error && <span style={{ color: '#ff6b6b' }}>Error: {error}</span>}
-          {launchData && (
-            <span style={{ color: '#51cf66' }}>
-              ✓ Orbit: {launchData.summary.h_err_m.toFixed(1)}m error
-            </span>
-          )}
-        </div>
-      </div>
+      {/* Launch Control Panel */}
+      {showControlPanel && <ControlPanel />}
     </div>
   );
 }

@@ -10,7 +10,7 @@ interface LaunchPadProps {
 }
 
 /**
- * Launch pad model loader - loads the Falcon 9 launching pad
+ * Launch pad model loader - loads the Falcon 9 launching pad (rocket removed in Blender)
  */
 export function LaunchPad({ 
   position = [0, 0, 50], 
@@ -20,20 +20,18 @@ export function LaunchPad({
   const groupRef = useRef<Group>(null);
   
   // Load the model
-  const { scene } = useGLTF('/models/falcon_9__launching_pad.glb') as GLTF & { scene: Group };
+  const { scene } = useGLTF('/models/falcon_launch_pad.glb') as GLTF & { scene: Group };
   
   useEffect(() => {
     if (scene) {
-      // Clone to avoid mutations on reuse
-      const cloned = scene.clone();
+      const cloned = scene.clone(true);
       
-      // Apply shadow settings to all meshes
+      // Setup shadows and materials
       cloned.traverse((child) => {
         if (child instanceof Mesh) {
           child.castShadow = true;
           child.receiveShadow = true;
           
-          // Enhance materials for sunset lighting
           if (child.material instanceof MeshStandardMaterial) {
             child.material.envMapIntensity = 0.5;
           }
@@ -41,7 +39,6 @@ export function LaunchPad({
       });
       
       if (groupRef.current) {
-        // Clear previous children
         while (groupRef.current.children.length > 0) {
           groupRef.current.remove(groupRef.current.children[0]);
         }
@@ -109,6 +106,6 @@ export function Rocket({
   );
 }
 
-// Preload models for faster loading
-useGLTF.preload('/models/falcon_9__launching_pad.glb');
+// Preload models
+useGLTF.preload('/models/falcon_launch_pad.glb');
 useGLTF.preload('/models/falcon_9_-_spacex.glb');
