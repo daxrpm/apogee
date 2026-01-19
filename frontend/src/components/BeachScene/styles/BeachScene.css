@@ -1,0 +1,118 @@
+/* BeachScene.css */
+
+.beach-scene-container {
+  width: 100vw;
+  height: 100vh;
+  background: #87ceeb;
+  position: relative;
+}
+
+/* Control Panel (Top Right) */
+.control-panel {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  color: white;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 16px 20px;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  min-width: 200px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: opacity 0.3s ease;
+}
+
+.control-panel h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  color: #87ceeb;
+  font-weight: 600;
+}
+
+.control-group {
+  margin-bottom: 12px;
+}
+
+.control-label {
+  font-size: 12px;
+  opacity: 0.7;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.control-input {
+  width: 100%;
+  accent-color: #87ceeb;
+  cursor: pointer;
+}
+
+.orientation-hint {
+  margin: 12px 0 0 0;
+  font-size: 11px;
+  opacity: 0.5;
+  text-align: center;
+}
+
+/* Info Overlay (Bottom Left) */
+.info-overlay {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  color: white;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 12px 16px;
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.location-text {
+  margin: 0 0 8px 0;
+  opacity: 0.9;
+  font-weight: 500;
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.launch-button {
+  background: #e04006;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 12px;
+  transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.launch-button:hover:not(:disabled) {
+  background: #ff5722;
+  transform: translateY(-1px);
+}
+
+.launch-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.launch-button:disabled {
+  background: #666;
+  cursor: wait;
+  opacity: 0.8;
+}
+
+.status-error {
+  color: #ff6b6b;
+}
+
+.status-success {
+  color: #51cf66;
+}
