@@ -49,7 +49,7 @@ export function Telemetry() {
   } = telemetry;
   
   // Unit conversions
-  const velocityKmS = velocity / 1000;  // m/s to km/s
+  const velocityKmh = velocity * 3.6;   // m/s to km/h
   const altitudeKm = altitude / 1000;   // m to km
   const gammaDeg = gamma * (180 / Math.PI);  // rad to degrees
   const massT = mass / 1000;            // kg to tonnes
@@ -63,8 +63,8 @@ export function Telemetry() {
           label="VELOCITY" 
           value1={Math.round(velocity)} 
           unit1="m/s"
-          value2={velocityKmS.toFixed(2)} 
-          unit2="km/s" 
+          value2={Math.round(velocityKmh)} 
+          unit2="km/h" 
         />
         <Metric 
           label="ALTITUDE" 
