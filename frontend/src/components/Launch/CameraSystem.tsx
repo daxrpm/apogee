@@ -11,11 +11,11 @@
  * @module Launch/CameraSystem
  */
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useSimulationStore } from '../../stores/simulationStore';
-import { interpolatePosition, interpolateValue } from '../../utils/coordinateTransform';
+import { interpolatePosition, interpolateValue, R_EARTH } from '../../utils/coordinateTransform';
 
 // ============ TYPES ============
 
@@ -28,7 +28,7 @@ export interface CameraConfig {
   description: string;
 }
 
-export const CAMERA_MODES: CameraConfig[] = [
+const CAMERA_MODES: CameraConfig[] = [
   { id: 'chase', label: 'Chase', icon: '🎬', description: 'Following camera' },
   { id: 'side', label: 'Side', icon: '📷', description: 'Lateral tracking' },
   { id: 'ground', label: 'Ground', icon: '🏠', description: 'From launch pad' },
@@ -50,14 +50,19 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
   const { launchData, animationTime } = useSimulationStore();
   const trajectory = launchData?.trajectory;
 
+  const downrangeM = useMemo(() => {
+    if (!trajectory) return null;
+    return trajectory.lambda_rad.map((lam) => lam * R_EARTH);
+  }, [trajectory]);
+
   useFrame(() => {
-    if (!trajectory) return;
+    if (!trajectory || !downrangeM) return;
 
     // Get current rocket position
     const [rocketX, rocketY, rocketZ] = interpolatePosition(
       trajectory.t_s,
-      trajectory.pos_m.x,
-      trajectory.pos_m.y,
+      trajectory.r_m,
+      downrangeM,
       animationTime
     );
     
@@ -71,7 +76,7 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
     let lookAt: THREE.Vector3;
     
     switch (mode) {
-      case 'chase':
+      case 'chase': {
         // Behind and slightly above the rocket
         const chaseDistance = 20 + Math.min(altitude / 5000, 50);
         targetPosition = new THREE.Vector3(
@@ -81,8 +86,9 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
         );
         lookAt = rocketPos;
         break;
+      }
         
-      case 'side':
+      case 'side': {
         // Lateral view, parallel to flight path
         const sideDistance = 30 + Math.min(altitude / 3000, 100);
         targetPosition = new THREE.Vector3(
@@ -92,6 +98,7 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
         );
         lookAt = rocketPos;
         break;
+      }
         
       case 'ground':
         // Fixed at launch pad, looking up
@@ -99,7 +106,7 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
         lookAt = rocketPos;
         break;
         
-      case 'wide':
+      case 'wide': {
         // Far away cinematic view
         const wideDistance = 100 + Math.min(altitude / 1000, 300);
         targetPosition = new THREE.Vector3(
@@ -109,6 +116,7 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
         );
         lookAt = rocketPos;
         break;
+      }
         
       case 'onboard':
         // From rocket TIP looking DOWN at engines (SpaceX style)
@@ -141,12 +149,12 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
 
   // Initialize camera position on mode change
   useEffect(() => {
-    if (!trajectory) return;
+    if (!trajectory || !downrangeM) return;
     
     const [x, y, z] = interpolatePosition(
       trajectory.t_s,
-      trajectory.pos_m.x,
-      trajectory.pos_m.y,
+      trajectory.r_m,
+      downrangeM,
       animationTime
     );
     
@@ -172,7 +180,7 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
     
     camera.position.copy(positionRef.current);
     camera.lookAt(targetRef.current);
-  }, [mode, trajectory, animationTime, camera]);
+  }, [mode, trajectory, downrangeM, animationTime, camera]);
 
   return null;
 }

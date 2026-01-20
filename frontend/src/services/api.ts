@@ -77,6 +77,12 @@ export interface TrajectoryData {
     /** Time points in seconds */
     t_s: number[];
 
+    /** Geocentric radius in meters */
+    r_m: number[];
+
+    /** Downrange central angle in radians */
+    lambda_rad: number[];
+
     /** Altitude in meters */
     h_m: number[];
 
@@ -101,6 +107,9 @@ export interface TrajectoryData {
 
     /** Mach number (optional) */
     mach?: number[];
+
+    /** Drag force in N (optional) */
+    drag_n?: number[];
 }
 
 /**

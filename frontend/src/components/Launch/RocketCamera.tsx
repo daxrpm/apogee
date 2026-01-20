@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Vector3 } from 'three';
 import { OrbitControls } from '@react-three/drei';
@@ -7,6 +7,7 @@ import { useSimulationStore } from '../../stores/simulationStore';
 import {
   interpolatePosition,
   interpolateValue,
+  R_EARTH,
 } from '../../utils/coordinateTransform';
 
 /**
@@ -46,15 +47,20 @@ export function RocketCamera({ enabled = true }: RocketCameraProps) {
   const trajectory = launchData?.trajectory;
   const isLaunching = currentScene === 'launch' && isPlaying;
 
+  const downrangeM = useMemo(() => {
+    if (!trajectory) return null;
+    return trajectory.lambda_rad.map((lam) => lam * R_EARTH);
+  }, [trajectory]);
+
   // Smooth camera follow
   useFrame(() => {
-    if (!isLaunching || !trajectory || !controlsRef.current) return;
+    if (!isLaunching || !trajectory || !downrangeM || !controlsRef.current) return;
 
     // Get current rocket position
     const [rocketX, rocketY, rocketZ] = interpolatePosition(
       trajectory.t_s,
-      trajectory.pos_m.x,
-      trajectory.pos_m.y,
+      trajectory.r_m,
+      downrangeM,
       animationTime
     );
 

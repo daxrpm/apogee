@@ -7,6 +7,7 @@ import {
   interpolateRotation,
   getTrajectoryDuration,
   interpolateValue,
+  R_EARTH,
 } from '../../utils/coordinateTransform';
 import { PropulsionFX } from './PropulsionFX';
 
@@ -89,8 +90,8 @@ export function LaunchAnimation({
     
     return {
       times: trajectory.t_s,
-      posX: trajectory.pos_m.x,
-      posY: trajectory.pos_m.y,
+      posX: trajectory.r_m,
+      posY: trajectory.lambda_rad.map((lam: number) => lam * R_EARTH),
       gammas: trajectory.gamma_rad,
       velocities: trajectory.v_mps,
       altitudes: trajectory.h_m,
