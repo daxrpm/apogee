@@ -88,14 +88,14 @@ export const PAD_POSITION = {
  * @returns Three.js position [x, y, z] in scene units
  */
 export function apiToScenePosition(
-  apiX: number,
-  apiY: number
+  r_m: number,
+  downrange_m: number
 ): [number, number, number] {
   // Convert from geocentric to altitude
-  const altitude_m = apiX - R_EARTH;
+  const altitude_m = r_m - R_EARTH;
 
   // Apply scale and offset from pad position
-  const sceneX = PAD_POSITION.x + apiY * SCENE_SCALE;  // Downrange → EAST
+  const sceneX = PAD_POSITION.x + downrange_m * SCENE_SCALE;  // Downrange → EAST
 
   // Add PAD_POSITION.y to ensure rocket starts at pad height, not at water level
   const sceneY = PAD_POSITION.y + altitude_m * SCENE_SCALE;  // Altitude → UP (already correct)
@@ -224,13 +224,13 @@ export function interpolateValue(
  */
 export function interpolatePosition(
   times: number[],
-  posX: number[],
-  posY: number[],
+  r_m: number[],
+  downrange_m: number[],
   t: number
 ): [number, number, number] {
-  const apiX = interpolateValue(times, posX, t);
-  const apiY = interpolateValue(times, posY, t);
-  return apiToScenePosition(apiX, apiY);
+  const r = interpolateValue(times, r_m, t);
+  const x = interpolateValue(times, downrange_m, t);
+  return apiToScenePosition(r, x);
 }
 
 /**
