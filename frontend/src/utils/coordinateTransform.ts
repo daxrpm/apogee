@@ -6,15 +6,13 @@
  * PHYSICS REFERENCE:
  * =================
  * 
- * API Coordinate System (Planar Polar, Earth-Centered):
- * - Origin: Earth center
- * - X axis: Initial radial direction (from Earth center through launch site)
- * - Y axis: Downrange direction (EAST, tangent to Earth surface)
- * - Z axis: 0 (equatorial plane, 2D trajectory)
- * 
- * pos_m.x = radial distance from Earth center [m]
- * pos_m.y = downrange distance from launch site [m]
- * pos_m.z = 0 (always, planar trajectory)
+ * API Coordinate System (Planar, Equatorial):
+ * - State uses planar polar variables: r_m (geocentric radius) and lambda_rad (downrange central angle).
+ * - Downrange distance along the equator is: downrange_m = R_EARTH * lambda_rad.
+ * - The backend also returns pos_m (Earth-centered Cartesian):
+ *   pos_m.x = r_m * cos(lambda_rad)
+ *   pos_m.y = r_m * sin(lambda_rad)
+ *   pos_m.z = 0
  * 
  * Three.js Scene Coordinate System (BeachScene):
  * - Origin: Launch pad on beach
@@ -83,8 +81,8 @@ export const PAD_POSITION = {
 /**
  * Converts API trajectory point to Three.js scene position.
  * 
- * @param apiX - Radial distance from Earth center [m] (pos_m.x from API)
- * @param apiY - Downrange distance [m] (pos_m.y from API)
+ * @param r_m - Geocentric radius [m]
+ * @param downrange_m - Downrange arc-length [m] (eastward, along equator)
  * @returns Three.js position [x, y, z] in scene units
  */
 export function apiToScenePosition(
@@ -217,8 +215,8 @@ export function interpolateValue(
  * Interpolates position at a given time.
  * 
  * @param times - Array of time points [s]
- * @param posX - Array of X positions (radial) [m]
- * @param posY - Array of Y positions (downrange) [m]
+ * @param r_m - Array of geocentric radius values [m]
+ * @param downrange_m - Array of downrange arc-length values [m]
  * @param t - Time to interpolate at [s]
  * @returns Interpolated scene position [x, y, z]
  */

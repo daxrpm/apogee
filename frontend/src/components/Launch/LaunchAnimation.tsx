@@ -22,9 +22,10 @@ import { PropulsionFX } from './PropulsionFX';
  * =======================
  * 
  * 1. POSITION:
- *    - API provides pos_m.x (radial from Earth center) and pos_m.y (downrange)
+ *    - API provides r_m (geocentric radius) and lambda_rad (downrange angle)
+ *    - Downrange distance is computed as R_EARTH * lambda_rad
  *    - Convert to Three.js: x = downrange, y = altitude, z = 0
- *    - Scale by SCENE_SCALE (1/1000) to fit scene
+ *    - Scale by SCENE_SCALE (1/10) to fit scene
  * 
  * 2. ROTATION (Flight Path Angle γ):
  *    - γ = 90° at liftoff (vertical, nose UP)
