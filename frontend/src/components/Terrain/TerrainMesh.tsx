@@ -1,51 +1,47 @@
+/**
+ * TerrainMesh - 3D terrain with multi-region satellite texture support
+ * 
+ * Renders a 3D terrain mesh using heightmap displacement and satellite imagery.
+ * Supports Ecuador, Quito, Pedernales, and Launch Beach regions with
+ * Google, Bing, and Google Hybrid satellite textures.
+ * 
+ * @module Terrain
+ */
+
 import { useMemo, useRef, useEffect } from 'react';
 import { useLoader, useThree } from '@react-three/fiber';
-import { TextureLoader, PlaneGeometry, Mesh, MeshStandardMaterial, DoubleSide, RepeatWrapping, CanvasTexture } from 'three';
-import type { Texture } from 'three';
+import { 
+  TextureLoader, 
+  PlaneGeometry, 
+  Mesh, 
+  MeshStandardMaterial, 
+  DoubleSide, 
+  RepeatWrapping, 
+  CanvasTexture,
+  type Texture,
+} from 'three';
+import { REGIONS, type RegionId, type TextureOption } from '../../types';
 
-// ============ TYPES ============
-
-export type RegionId = 'ecuador' | 'quito' | 'pedernales' | 'launch_beach';
-export type TextureOption = 'google' | 'bing' | 'google_hybrid';
-
-export interface RegionConfig {
-  id: RegionId;
-  label: string;
-  width: number;
-  height: number;
-}
-
-export interface TextureConfig {
-  id: TextureOption;
-  label: string;
-}
-
-// ============ REGION CONFIGURATIONS ============
-
-export const REGIONS: RegionConfig[] = [
-  { id: 'ecuador', label: '🇪🇨 Ecuador', width: 12, height: 7.22 },
-  { id: 'quito', label: '🏙️ Quito', width: 12, height: 7.22 },
-  { id: 'pedernales', label: '🏖️ Pedernales', width: 12, height: 7.21 },
-  { id: 'launch_beach', label: '🚀 Launch Beach', width: 12, height: 7.21 },
-];
-
-export const TEXTURE_OPTIONS: TextureConfig[] = [
-  { id: 'google', label: 'Google Satellite' },
-  { id: 'bing', label: 'Bing Satellite' },
-  { id: 'google_hybrid', label: 'Google Hybrid' },
-];
-
-// ============ TERRAIN COMPONENT ============
+// ============ COMPONENT PROPS ============
 
 interface TerrainMeshProps {
+  /** Region to display */
   regionId: RegionId;
+  /** Satellite texture source */
   textureId: TextureOption;
+  /** Mesh resolution (higher = more detail but slower) */
   segments?: number;
+  /** Maximum elevation scaling factor */
   maxElevation?: number;
 }
 
+// ============ MAIN COMPONENT ============
+
 /**
- * TerrainMesh - 3D terrain with multi-region and multi-texture support
+ * TerrainMesh - Renders a 3D terrain mesh with satellite textures
+ * 
+ * Uses heightmap PNG files to displace vertices and satellite imagery for color.
+ * All textures are preloaded to avoid conditional hook issues.
  */
 export function TerrainMesh({
   regionId,
@@ -56,54 +52,56 @@ export function TerrainMesh({
   const meshRef = useRef<Mesh>(null);
   const { invalidate } = useThree();
 
-  // Get region config
-  const region = REGIONS.find(r => r.id === regionId) || REGIONS[0];
+  // Get region config with elevation
+  const region = REGIONS.find(r => r.id === regionId) ?? REGIONS[0];
+  const effectiveElevation = maxElevation ?? region.elevation;
 
-  // ===== LOAD ALL TEXTURES UPFRONT (hooks must be called unconditionally) =====
+  // ===== PRELOAD ALL TEXTURES (hooks must be unconditional) =====
   
-  // Ecuador textures
+  // Ecuador
   const ecuadorHeight = useLoader(TextureLoader, '/assets/ecuador_height.png');
   const ecuadorGoogle = useLoader(TextureLoader, '/assets/ecuador_color_google_sat.png');
   const ecuadorBing = useLoader(TextureLoader, '/assets/ecuador_color_bing_sat.png');
   const ecuadorHybrid = useLoader(TextureLoader, '/assets/ecuador_color_google_sat_hy.png');
 
-  // Quito textures  
+  // Quito
   const quitoHeight = useLoader(TextureLoader, '/assets/quito_height.png');
   const quitoGoogle = useLoader(TextureLoader, '/assets/quito_color_google_sat.png');
   const quitoBing = useLoader(TextureLoader, '/assets/quito_color_bing_sat.png');
   const quitoHybrid = useLoader(TextureLoader, '/assets/quito_color_google_sat_hy.png');
 
-  // Pedernales textures
+  // Pedernales
   const pedernalesHeight = useLoader(TextureLoader, '/assets/pedernales_height.png');
   const pedernalesGoogle = useLoader(TextureLoader, '/assets/pedernales_color_google_sat.png');
   const pedernalesBing = useLoader(TextureLoader, '/assets/pedernales_color_bing_sat.png');
   const pedernalesHybrid = useLoader(TextureLoader, '/assets/pedernales_color_google_sat_hy.png');
 
-  // Launch Beach textures
+  // Launch Beach
   const launchBeachHeight = useLoader(TextureLoader, '/assets/launch_beach_height.png');
   const launchBeachGoogle = useLoader(TextureLoader, '/assets/launch_beach_color_google_sat.png');
   const launchBeachBing = useLoader(TextureLoader, '/assets/launch_beach_color_bing_sat.png');
   const launchBeachHybrid = useLoader(TextureLoader, '/assets/launch_beach_color_google_sat_hy.png');
 
-  // ===== SELECT ACTIVE TEXTURES BASED ON PROPS =====
-  
+  // ===== SELECT ACTIVE TEXTURES =====
+
   const heightTexture: Texture = useMemo(() => {
-    switch (regionId) {
-      case 'quito': return quitoHeight;
-      case 'pedernales': return pedernalesHeight;
-      case 'launch_beach': return launchBeachHeight;
-      default: return ecuadorHeight;
-    }
+    const heightMap: Record<RegionId, Texture> = {
+      ecuador: ecuadorHeight,
+      quito: quitoHeight,
+      pedernales: pedernalesHeight,
+      launch_beach: launchBeachHeight,
+    };
+    return heightMap[regionId] ?? ecuadorHeight;
   }, [regionId, ecuadorHeight, quitoHeight, pedernalesHeight, launchBeachHeight]);
-  
+
   const colorTexture: Texture = useMemo(() => {
-    const textures = {
+    const textureMap: Record<RegionId, Record<TextureOption, Texture>> = {
       ecuador: { google: ecuadorGoogle, bing: ecuadorBing, google_hybrid: ecuadorHybrid },
       quito: { google: quitoGoogle, bing: quitoBing, google_hybrid: quitoHybrid },
       pedernales: { google: pedernalesGoogle, bing: pedernalesBing, google_hybrid: pedernalesHybrid },
       launch_beach: { google: launchBeachGoogle, bing: launchBeachBing, google_hybrid: launchBeachHybrid },
     };
-    return textures[regionId]?.[textureId] || ecuadorGoogle;
+    return textureMap[regionId]?.[textureId] ?? ecuadorGoogle;
   }, [
     regionId, textureId,
     ecuadorGoogle, ecuadorBing, ecuadorHybrid,
@@ -112,10 +110,12 @@ export function TerrainMesh({
     launchBeachGoogle, launchBeachBing, launchBeachHybrid,
   ]);
 
-  // Create geometry with displaced vertices
+  // ===== GEOMETRY WITH HEIGHTMAP DISPLACEMENT =====
+
   const geometry = useMemo(() => {
     const geo = new PlaneGeometry(region.width, region.height, segments, segments);
     
+    // Read heightmap pixels
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx || !heightTexture.image) return geo;
@@ -125,50 +125,50 @@ export function TerrainMesh({
     canvas.height = img.height;
     ctx.drawImage(img, 0, 0);
     
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const pixels = imageData.data;
-
+    const { data: pixels } = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const positions = geo.attributes.position.array as Float32Array;
     const vertexCount = positions.length / 3;
 
+    // Displace vertices based on heightmap
     for (let i = 0; i < vertexCount; i++) {
       const x = positions[i * 3];
       const y = positions[i * 3 + 1];
       
+      // UV coordinates
       const u = (x / region.width + 0.5);
       const v = (y / region.height + 0.5);
       
+      // Pixel coordinates
       const px = Math.floor(u * (canvas.width - 1));
       const py = Math.floor((1 - v) * (canvas.height - 1));
       
+      // Get height value (white = high, black = low, 254+ = water/zero)
       const pixelIndex = (py * canvas.width + px) * 4;
       const rawValue = pixels[pixelIndex];
+      const heightValue = rawValue >= 254 ? 0 : rawValue / 254;
       
-      let heightValue: number;
-      if (rawValue >= 254) {
-        heightValue = 0;
-      } else {
-        heightValue = rawValue / 254;
-      }
-      
-      positions[i * 3 + 2] = heightValue * maxElevation;
+      positions[i * 3 + 2] = heightValue * effectiveElevation;
     }
 
     geo.attributes.position.needsUpdate = true;
     geo.computeVertexNormals();
 
     return geo;
-  }, [region.width, region.height, segments, maxElevation, heightTexture]);
+  }, [region.width, region.height, segments, effectiveElevation, heightTexture]);
 
-  // Create procedural detail texture
+  // ===== PROCEDURAL DETAIL TEXTURE =====
+
   const detailTexture = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 512;
     const ctx = canvas.getContext('2d');
+    
     if (ctx) {
       ctx.fillStyle = '#808080';
       ctx.fillRect(0, 0, 512, 512);
+      
+      // Add noise for surface detail
       for (let i = 0; i < 50000; i++) {
         const x = Math.random() * 512;
         const y = Math.random() * 512;
@@ -177,6 +177,7 @@ export function TerrainMesh({
         ctx.fillRect(x, y, 2, 2);
       }
     }
+    
     const tex = new CanvasTexture(canvas);
     tex.wrapS = RepeatWrapping;
     tex.wrapT = RepeatWrapping;
@@ -184,7 +185,8 @@ export function TerrainMesh({
     return tex;
   }, []);
 
-  // Create material
+  // ===== MATERIAL =====
+
   const material = useMemo(() => {
     return new MeshStandardMaterial({
       map: colorTexture,
@@ -197,6 +199,7 @@ export function TerrainMesh({
     });
   }, [colorTexture, detailTexture]);
 
+  // Trigger re-render when textures change
   useEffect(() => {
     invalidate();
   }, [colorTexture, heightTexture, invalidate]);
@@ -214,24 +217,4 @@ export function TerrainMesh({
   );
 }
 
-// ============ LEGACY EXPORT =============
-
-interface EcuadorTerrainProps {
-  width?: number;
-  height?: number;
-  segments?: number;
-  maxElevation?: number;
-  autoRotate?: boolean;
-  textureId?: TextureOption;
-}
-
-export function EcuadorTerrain(props: EcuadorTerrainProps) {
-  return (
-    <TerrainMesh
-      regionId="ecuador"
-      textureId={props.textureId || 'google'}
-      segments={props.segments}
-      maxElevation={props.maxElevation}
-    />
-  );
-}
+export default TerrainMesh;

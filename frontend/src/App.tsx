@@ -1,12 +1,27 @@
 /**
  * App.tsx - Main Application Entry Point
  * 
- * Provides scene switching between Terrain Maps and Beach Launch views.
+ * Navigation flow: Ecuador → Quito → Pedernales → Beach → Launch → Orbit
+ * Uses real satellite textures and heightmaps for 3D terrain visualization.
  * 
  * @module App
  */
 
+import { useEffect, useState, useCallback } from 'react';
 import { BeachScene } from './components/BeachScene';
+import { 
+  SceneTransition,
+  ProgressTimer,
+  NavigationTerrainScene,
+} from './components/Navigation';
+import { useSimulationStore } from './stores/simulationStore';
+import { SCENE_INFO, type SceneType } from './types';
+
+// ============ CONSTANTS ============
+
+const INTRO_SCENES: SceneType[] = ['ecuador', 'quito', 'pedernales'];
+const MAIN_SCENES: SceneType[] = ['beach', 'launch', 'orbit'];
+const AUTO_ADVANCE_MS = 10000;
 
 // ============ STYLES ============
 
@@ -16,58 +31,109 @@ const styles = {
     height: '100vh',
     position: 'relative' as const,
     overflow: 'hidden',
+    background: '#000',
   },
-  modeSwitcher: {
+  skipButton: {
     position: 'absolute' as const,
     top: 20,
-    left: 20,
-    zIndex: 100,
-    display: 'flex',
-    gap: '8px',
-  },
-  modeButton: {
-    padding: '12px 20px',
-    borderRadius: '8px',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '14px',
+    right: 20,
+    zIndex: 200,
+    background: 'rgba(255, 255, 255, 0.1)',
+    border: '1px solid rgba(255, 255, 255, 0.3)',
+    borderRadius: 4,
+    padding: '8px 16px',
+    color: '#fff',
+    fontSize: 12,
     fontWeight: 600,
-    fontFamily: 'system-ui, sans-serif',
-    color: 'white',
-    backdropFilter: 'blur(10px)',
+    letterSpacing: 1,
+    cursor: 'pointer',
+    fontFamily: "'Roboto Mono', monospace",
     transition: 'all 0.2s ease',
   },
-  inactive: {
-    background: 'rgba(0, 0, 0, 0.7)',
+  progressContainer: {
+    position: 'absolute' as const,
+    top: 20,
+    right: 140,
+    zIndex: 200,
   },
-  activeTerrain: {
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    boxShadow: '0 4px 6px rgba(99, 102, 241, 0.3)',
-  },
-  activeBeach: {
-    background: 'linear-gradient(135deg, #ff6b35, #ff9966)',
-    boxShadow: '0 4px 6px rgba(255, 107, 53, 0.3)',
-  },
-};
+} as const;
 
 // ============ COMPONENT ============
 
-/**
- * Apogee Frontend - 3D Launch & Orbit Visualization
- * 
- * Main application component that provides scene switching between:
- * 1. **Terrain Mode**: 3D terrain visualization of Ecuador
- * 2. **Beach Mode**: Launch site at Pedernales with rocket pad
- * 
- * Future additions:
- * - Rocket launch animation using trajectory data from API
- * - Orbital trajectory visualization
- * - Stage separation and landing simulation
- */
 function App() {
+  const { currentScene, nextScene, skipToBeach, hasSeenIntro } = useSimulationStore();
+  const [isUserInteracting, setIsUserInteracting] = useState(false);
+
+  const isIntroScene = INTRO_SCENES.includes(currentScene);
+
+  const handleInteractionChange = useCallback((isInteracting: boolean) => {
+    setIsUserInteracting(isInteracting);
+  }, []);
+
+  // Skip intro on reload if already seen
+  useEffect(() => {
+    if (hasSeenIntro && isIntroScene) {
+      skipToBeach();
+    }
+  }, [hasSeenIntro, isIntroScene, skipToBeach]);
+
+  // Reset interaction state on scene change
+  useEffect(() => {
+    setIsUserInteracting(false);
+  }, [currentScene]);
+
   return (
     <div style={styles.container}>
-      <BeachScene showStats={true} showModels={true} />
+      {/* Intro terrain scenes */}
+      {INTRO_SCENES.map((sceneId) => (
+        <SceneTransition 
+          key={sceneId}
+          isActive={currentScene === sceneId} 
+          autoAdvanceMs={AUTO_ADVANCE_MS}
+          onComplete={nextScene}
+          isPaused={isUserInteracting}
+        >
+          <NavigationTerrainScene 
+            regionId={sceneId as 'ecuador' | 'quito' | 'pedernales'}
+            sceneInfo={SCENE_INFO[sceneId]}
+            onContinue={nextScene}
+            onInteractionChange={handleInteractionChange}
+          />
+          {currentScene === sceneId && (
+            <div style={styles.progressContainer}>
+              <ProgressTimer 
+                duration={AUTO_ADVANCE_MS} 
+                isActive={currentScene === sceneId}
+                isPaused={isUserInteracting} 
+              />
+            </div>
+          )}
+        </SceneTransition>
+      ))}
+
+      {/* Skip intro button */}
+      {isIntroScene && (
+        <button 
+          style={styles.skipButton}
+          onClick={skipToBeach}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+          }}
+        >
+          SKIP INTRO →
+        </button>
+      )}
+
+      {/* Main scenes (Beach, Launch, Orbit) */}
+      <SceneTransition 
+        isActive={MAIN_SCENES.includes(currentScene)}
+        autoAdvanceMs={0}
+      >
+        <BeachScene showStats={false} showModels={true} />
+      </SceneTransition>
     </div>
   );
 }

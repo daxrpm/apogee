@@ -1,188 +1,385 @@
-import { useTrajectoryTelemetry, useFlightEvents } from '../../hooks/useTrajectory';
-import { useSimulationStore } from '../../stores/simulationStore';
-
 /**
- * Telemetry HUD - SpaceX-style telemetry display
+ * Telemetry - SpaceX-style HUD overlay
  * 
- * Shows real-time flight data during launch:
- * - Mission time (T+)
- * - Altitude (km)
- * - Velocity (m/s and km/h)
- * - Flight path angle (γ)
- * - Current flight phase
+ * Minimal, modern telemetry display showing all critical flight data.
+ * 
+ * @module Launch/Telemetry
  */
 
+import { useMemo } from 'react';
+import { useSimulationStore } from '../../stores/simulationStore';
+import { useTrajectoryTelemetry, useFlightEvents } from '../../hooks/useTrajectory';
+
 export function Telemetry() {
-  const { isPlaying, currentScene } = useSimulationStore();
+  const { currentScene, isPlaying, currentStage, enginesActive } = useSimulationStore();
   const telemetry = useTrajectoryTelemetry();
   const events = useFlightEvents();
 
-  // Only show during launch
-  if (currentScene !== 'launch' || !isPlaying) {
-    return null;
-  }
+  const shouldShow = currentScene === 'launch' && isPlaying && telemetry;
 
-  // Format time as T+MM:SS
+  // Format time as MM:SS
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    return `T+${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `T+ ${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Format altitude
-  const altitudeKm = telemetry.altitude / 1000;
-  const altitudeDisplay = altitudeKm < 1 
-    ? `${Math.round(telemetry.altitude)} m`
-    : `${altitudeKm.toFixed(1)} km`;
+  // Get current event status
+  const currentEvent = useMemo(() => {
+    if (!events || !telemetry) return 'STARTUP';
+    
+    if (events.stageSepTime && telemetry.time >= events.stageSepTime) {
+      return 'STAGE SEP';
+    }
+    if (events.maxQTime && telemetry.time >= events.maxQTime) {
+      return 'MAX Q';
+    }
+    return 'LIFTOFF';
+  }, [events, telemetry]);
 
-  // Format velocity
-  const velocityMps = Math.round(telemetry.velocity);
-  const velocityKmh = Math.round(telemetry.velocity * 3.6);
+  if (!shouldShow) return null;
 
-  // Format gamma (flight path angle)
-  const gammaDeg = (telemetry.gamma * 180 / Math.PI).toFixed(1);
-
-  // Phase display
-  const phaseLabels: Record<string, string> = {
-    'pre-launch': 'PRE-LAUNCH',
-    'liftoff': 'LIFTOFF',
-    'gravity-turn': 'GRAVITY TURN',
-    'maxq': 'MAX-Q',
-    'stage-sep': 'STAGE SEPARATION',
-    'stage2': 'STAGE 2 BURN',
-    'orbit': 'ORBITAL INSERTION',
-  };
+  const {
+    velocity,      // m/s
+    altitude,      // m
+    time,          // s
+    gamma,         // rad
+    mass,          // kg
+    dynamicPressure, // Pa
+  } = telemetry;
+  
+  // Unit conversions
+  const velocityKmS = velocity / 1000;  // m/s to km/s
+  const altitudeKm = altitude / 1000;   // m to km
+  const gammaDeg = gamma * (180 / Math.PI);  // rad to degrees
+  const massT = mass / 1000;            // kg to tonnes
+  const qKpa = dynamicPressure / 1000;  // Pa to kPa
 
   return (
     <div style={styles.container}>
-      {/* Mission Timer */}
-      <div style={styles.timer}>
-        {formatTime(telemetry.time)}
+      {/* Left side metrics */}
+      <div style={styles.leftGroup}>
+        <MetricDual 
+          label="VELOCITY" 
+          value1={Math.round(velocity)} 
+          unit1="m/s"
+          value2={velocityKmS.toFixed(2)} 
+          unit2="km/s" 
+        />
+        <Metric 
+          label="ALTITUDE" 
+          value={altitudeKm.toFixed(1)} 
+          unit="km" 
+        />
+        <Metric 
+          label="ANGLE" 
+          value={gammaDeg.toFixed(1)} 
+          unit="°" 
+        />
       </div>
 
-      {/* Flight Phase */}
-      <div style={styles.phase}>
-        {phaseLabels[events.phase] || events.phase.toUpperCase()}
+      {/* Center: Timeline & Time */}
+      <div style={styles.centerGroup}>
+        <div style={styles.timeline}>
+          <TimelineStep label="LIFTOFF" active={time >= 0} />
+          <TimelineStep label="STARTUP" active={time >= 1} />
+          <TimelineStep label="MAX Q" active={events?.maxQTime ? time >= events.maxQTime : false} />
+          <TimelineStep label="STAGE SEP" active={events?.stageSepTime ? time >= events.stageSepTime : false} />
+        </div>
+        
+        <div style={styles.missionTime}>{formatTime(time)}</div>
+        
+        <div style={styles.eventLabel}>{currentEvent}</div>
       </div>
 
-      {/* Telemetry Grid */}
-      <div style={styles.grid}>
-        {/* Altitude */}
-        <div style={styles.item}>
-          <div style={styles.label}>ALTITUDE</div>
-          <div style={styles.value}>{altitudeDisplay}</div>
-        </div>
-
-        {/* Velocity */}
-        <div style={styles.item}>
-          <div style={styles.label}>VELOCITY</div>
-          <div style={styles.value}>{velocityMps.toLocaleString()} m/s</div>
-          <div style={styles.subValue}>{velocityKmh.toLocaleString()} km/h</div>
-        </div>
-
-        {/* Flight Path Angle */}
-        <div style={styles.item}>
-          <div style={styles.label}>FLIGHT ANGLE</div>
-          <div style={styles.value}>{gammaDeg}°</div>
-        </div>
-
-        {/* Mach (if available) */}
-        {telemetry.mach > 0 && (
-          <div style={styles.item}>
-            <div style={styles.label}>MACH</div>
-            <div style={styles.value}>{telemetry.mach.toFixed(2)}</div>
-          </div>
-        )}
-
-        {/* Dynamic Pressure (if available) */}
-        {telemetry.dynamicPressure > 0 && (
-          <div style={styles.item}>
-            <div style={styles.label}>Q</div>
-            <div style={styles.value}>{(telemetry.dynamicPressure / 1000).toFixed(1)} kPa</div>
-          </div>
-        )}
+      {/* Right side metrics */}
+      <div style={styles.rightGroup}>
+        <Metric 
+          label="MASS" 
+          value={massT.toFixed(1)} 
+          unit="t" 
+        />
+        <Metric 
+          label="DYN PRESS" 
+          value={qKpa.toFixed(0)} 
+          unit="kPa" 
+        />
+        <EngineStatus stage={currentStage} active={enginesActive} />
       </div>
+    </div>
+  );
+}
 
-      {/* Event Indicators */}
-      <div style={styles.events}>
-        {events.isMaxQ && (
-          <div style={styles.eventAlert}>⚠️ MAX-Q</div>
-        )}
-        {events.isStageSep && (
-          <div style={styles.eventAlert}>🚀 STAGE SEP</div>
+// ============ SUB-COMPONENTS ============
+
+interface MetricProps {
+  label: string;
+  value: string | number;
+  unit: string;
+}
+
+function Metric({ label, value, unit }: MetricProps) {
+  return (
+    <div style={styles.metric}>
+      <div style={styles.metricLabel}>{label}</div>
+      <div style={styles.metricValue}>
+        <span style={styles.metricNumber}>{value}</span>
+        <span style={styles.metricUnit}>{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+interface MetricDualProps {
+  label: string;
+  value1: string | number;
+  unit1: string;
+  value2: string | number;
+  unit2: string;
+}
+
+function MetricDual({ label, value1, unit1, value2, unit2 }: MetricDualProps) {
+  return (
+    <div style={styles.metric}>
+      <div style={styles.metricLabel}>{label}</div>
+      <div style={styles.metricValue}>
+        <span style={styles.metricNumber}>{value1}</span>
+        <span style={styles.metricUnit}>{unit1}</span>
+      </div>
+      <div style={styles.metricValueSecondary}>
+        <span style={styles.metricNumberSecondary}>{value2}</span>
+        <span style={styles.metricUnitSecondary}>{unit2}</span>
+      </div>
+    </div>
+  );
+}
+
+interface TimelineStepProps {
+  label: string;
+  active: boolean;
+}
+
+function TimelineStep({ label, active }: TimelineStepProps) {
+  return (
+    <div style={{
+      ...styles.timelineStep,
+      ...(active ? styles.timelineStepActive : {}),
+    }}>
+      <div style={active ? styles.timelineDotActive : styles.timelineDot} />
+      <div style={styles.timelineLabel}>{label}</div>
+    </div>
+  );
+}
+
+interface EngineStatusProps {
+  stage: 1 | 2;
+  active: boolean;
+}
+
+function EngineStatus({ stage, active }: EngineStatusProps) {
+  return (
+    <div style={styles.engines}>
+      <div style={styles.metricLabel}>ENGINES</div>
+      <div style={styles.engineGrid}>
+        {stage === 1 ? (
+          // Stage 1: 9 engines in octaweb pattern
+          <>
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+              <div
+                key={i}
+                style={{
+                  ...styles.engineDot,
+                  ...(active ? styles.engineDotActive : {}),
+                }}
+              />
+            ))}
+            <div
+              style={{
+                ...styles.engineDotCenter,
+                ...(active ? styles.engineDotActive : {}),
+              }}
+            />
+          </>
+        ) : (
+          // Stage 2: 1 engine
+          <div
+            style={{
+              ...styles.engineDotSingle,
+              ...(active ? styles.engineDotActive : {}),
+            }}
+          />
         )}
       </div>
     </div>
   );
 }
 
+// ============ STYLES ============
+
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    position: 'absolute',
-    top: 20,
-    left: 20,
-    background: 'rgba(0, 0, 0, 0.75)',
-    color: 'white',
-    padding: '16px 24px',
-    borderRadius: 8,
-    fontFamily: "'Roboto Mono', 'Courier New', monospace",
-    minWidth: 220,
-    backdropFilter: 'blur(8px)',
-    border: '1px solid rgba(255, 255, 255, 0.1)',
+    position: 'fixed',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 65,  // Reduced from 80
+    background: 'linear-gradient(to top, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.75))',
+    backdropFilter: 'blur(10px)',
+    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '0 30px',
+    fontFamily: "'Roboto Mono', monospace",
+    zIndex: 50,
   },
-  timer: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 8,
-    color: '#00ff88',
-    letterSpacing: 2,
+  leftGroup: {
+    display: 'flex',
+    gap: 30,
+    flex: 1.2,
   },
-  phase: {
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 16,
-    padding: '4px 12px',
-    background: 'rgba(0, 150, 255, 0.3)',
-    borderRadius: 4,
-    color: '#88ccff',
-    fontWeight: 'bold',
-  },
-  grid: {
+  centerGroup: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 12,
+    alignItems: 'center',
+    gap: 3,
+    flex: 1.5,
   },
-  item: {
-    borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-    paddingBottom: 8,
+  rightGroup: {
+    display: 'flex',
+    gap: 30,
+    flex: 1.2,
+    justifyContent: 'flex-end',
   },
-  label: {
-    fontSize: 10,
-    color: '#888',
-    marginBottom: 2,
+  
+  // Metrics
+  metric: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+  },
+  metricLabel: {
+    fontSize: 8,
     letterSpacing: 1,
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontWeight: 700,
   },
-  value: {
-    fontSize: 18,
-    fontWeight: 'bold',
+  metricValue: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 3,
   },
-  subValue: {
-    fontSize: 12,
-    color: '#888',
+  metricNumber: {
+    fontSize: 24,  // Reduced from 32
+    fontWeight: 700,
+    color: '#fff',
+    lineHeight: 1,
   },
-  events: {
-    marginTop: 12,
+  metricUnit: {
+    fontSize: 11,  // Reduced from 14
+    color: 'rgba(255, 255, 255, 0.6)',
+  },
+  
+  // Timeline
+  timeline: {
+    display: 'flex',
+    gap: 16,
+    alignItems: 'center',
+  },
+  timelineStep: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 8,
+    alignItems: 'center',
+    gap: 3,
+    opacity: 0.3,
+    transition: 'opacity 0.3s ease',
   },
-  eventAlert: {
-    background: 'rgba(255, 100, 0, 0.3)',
-    padding: '8px 12px',
-    borderRadius: 4,
-    textAlign: 'center',
-    fontWeight: 'bold',
-    animation: 'pulse 1s infinite',
+  timelineStepActive: {
+    opacity: 1,
+  },
+  timelineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: '50%',
+    background: 'rgba(255, 255, 255, 0.3)',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+  },
+  timelineDotActive: {
+    width: 7,
+    height: 7,
+    borderRadius: '50%',
+    background: '#6366f1',
+    border: '1px solid #8b5cf6',
+    boxShadow: '0 0 8px rgba(99, 102, 241, 0.8)',
+  },
+  timelineLabel: {
+    fontSize: 7,
+    fontWeight: 600,
+    color: 'rgba(255, 255, 255, 0.7)',
+    letterSpacing: 0.5,
+  },
+  
+  // Mission time
+  missionTime: {
+    fontSize: 22,  // Reduced from 28
+    fontWeight: 700,
+    color: '#fff',
+    letterSpacing: 2,
+    marginTop: 2,
+  },
+  
+  // Event label
+  eventLabel: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: '#6366f1',
+    letterSpacing: 1.3,
+    marginTop: 1,
+  },
+  
+  // Engine status
+  engines: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 5,
+  },
+  engineGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: 2,
+    width: 36,
+  },
+  engineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    background: 'rgba(255, 255, 255, 0.1)',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    transition: 'all 0.2s ease',
+  },
+  engineDotCenter: {
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    background: 'rgba(255, 255, 255, 0.1)',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    transition: 'all 0.2s ease',
+  },
+  engineDotActive: {
+    background: '#ff6600',
+    border: '1px solid #ff8833',
+    boxShadow: '0 0 6px rgba(255, 102, 0, 0.8)',
+  },
+  engineDotSingle: {
+    width: 20,
+    height: 20,
+    borderRadius: '50%',
+    background: 'rgba(255, 255, 255, 0.1)',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    transition: 'all 0.2s ease',
+    gridColumn: '1 / -1',
+    justifySelf: 'center',
   },
 };
+
+export default Telemetry;

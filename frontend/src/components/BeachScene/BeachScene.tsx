@@ -1,4 +1,4 @@
-import { Suspense, useRef } from 'react';
+import { Suspense, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Stats, Loader } from '@react-three/drei';
 import { Vector3 } from 'three';
@@ -13,6 +13,7 @@ import { ControlPanel } from './ControlPanel';
 import { LaunchAnimation } from '../Launch/LaunchAnimation';
 import { RocketCamera } from '../Launch/RocketCamera';
 import { Telemetry } from '../Launch/Telemetry';
+import { LaunchCamera, CameraSelector, type CameraMode } from '../Launch/CameraSystem';
 
 // Store
 import { useSimulationStore } from '../../stores/simulationStore';
@@ -30,11 +31,14 @@ interface BeachSceneProps {
  * - CENTER: Sandy beach with launch pad
  * - EAST (positive X): Mountains as backdrop
  * 
- * Camera looks from south, with west to the left and east to the right
+ * Features SpaceX-style multiple camera views during launch.
  */
 export function BeachScene({ showStats = false, showModels = true }: BeachSceneProps) {
   const rocketRef = useRef<Falcon9RocketRef>(null);
   const { currentScene, isPlaying } = useSimulationStore();
+  
+  // Camera mode for launch visualization
+  const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
   
   // Fixed pad position and scale
   const padPosition: [number, number, number] = [0, 2, 0];
@@ -44,29 +48,30 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
   // Sun position for daytime lighting
   const sunDirection = new Vector3(50, 120, -30);
   
-  // Show control panel only before launch
+  // Scene state
   const showControlPanel = currentScene === 'beach';
   const isLaunching = currentScene === 'launch' && isPlaying;
+  const showCameraSelector = currentScene === 'launch';
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#87ceeb' }}>
       <Canvas
         shadows
         camera={{
-          position: [0, 60, 250],  // Further back and higher
+          position: [0, 60, 250],
           fov: 55,
           near: 1,
-          far: 150000,  // Extended for high altitude trajectories
+          far: 150000,
         }}
         gl={{
-          antialias: false,  // Disable for performance
+          antialias: false,
           alpha: false,
           powerPreference: 'high-performance',
         }}
       >
         {showStats && <Stats />}
 
-        {/* Daytime Blue Sky - extended for rocket tracking */}
+        {/* Daytime Blue Sky */}
         <DaytimeSky sunPosition={sunDirection} />
         <DaytimeClouds count={10} />
 
@@ -76,22 +81,26 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
           intensity={2.0}
         />
 
-        {/* Camera Controls - follows rocket during launch */}
-        <RocketCamera />
+        {/* Camera Controls */}
+        {isLaunching ? (
+          // During launch: use multi-camera system
+          <LaunchCamera mode={cameraMode} />
+        ) : (
+          // Pre-launch: standard orbit controls
+          <RocketCamera />
+        )}
 
-        {/* ====== OCEAN (WEST side, negative X) ====== */}
-        {/* Massive ocean plane extending to horizon on the West */}
+        {/* ====== OCEAN (WEST side) ====== */}
         <OceanWater 
           position={[-600, -2, 0]} 
           sunDirection={sunDirection}
         />
 
         {/* ====== SANDY BEACH (CENTER) ====== */}
-        {/* Narrower East-West, Longer North-South */}
         <BeachSand 
           position={[0, -1.5, 0]} 
-          width={200}    // Narrower: 200m
-          depth={6000}   // Longer: 2km North-South
+          width={200}
+          depth={6000}
         />
 
         {/* Launch Pad + Falcon 9 Rocket */}
@@ -105,9 +114,8 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
                 rotation={[0, Math.PI/2, 0]}
               />
               
-              {/* Falcon 9 Rocket with animation wrapper */}
+              {/* Falcon 9 Rocket */}
               {isLaunching ? (
-                // During launch: animate rocket following trajectory
                 <LaunchAnimation timeScale={3}>
                   <Falcon9Rocket
                     ref={rocketRef}
@@ -115,12 +123,11 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
                   />
                 </LaunchAnimation>
               ) : (
-                // Pre-launch: static rocket on pad
                 <Falcon9Rocket
                   ref={rocketRef}
                   position={[padPosition[0] - 0.5, padPosition[1], padPosition[2]]}
                   scale={rocketScale}
-                  rotation={[0, 0, 0]}  // VERTICAL - nose UP
+                  rotation={[0, 0, 0]}
                 />
               )}
             </group>
@@ -128,7 +135,6 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
         </Suspense>
 
         {/* ====== VEGETATION (EAST of beach) ====== */}
-        {/* Green ground transition, slightly lowered to match sand */}
         <mesh 
           rotation={[-Math.PI / 2, 0, 0]} 
           position={[300, -1.0, 0]} 
@@ -138,7 +144,7 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
           <meshStandardMaterial color="#2d5a2d" roughness={0.95} />
         </mesh>
 
-        {/* Palm forest density */}
+        {/* Palm forest */}
         <Suspense fallback={null}>
           <group position={[0, -1.0, 0]}>
             <PalmForest 
@@ -152,8 +158,7 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
           </group>
         </Suspense>
 
-        {/* ====== MOUNTAIN (EAST side, positive X) ====== */}
-        {/* Distant massive backdrop, moved closer to meet vegetation (x=450) */}
+        {/* ====== MOUNTAIN (EAST side) ====== */}
         <Suspense fallback={null}>
           <RealisticMountain 
             position={[150, 40, 0]}
@@ -162,10 +167,10 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
           />
         </Suspense>
 
-        {/* ====== WILDLIFE ====== */}
+        {/* Wildlife */}
         <Seagulls count={15} />
 
-        {/* Shadow receiver plane (spanning entire active area) */}
+        {/* Shadow receiver */}
         <mesh 
           rotation={[-Math.PI / 2, 0, 0]} 
           position={[0, -0.1, 0]} 
@@ -178,6 +183,14 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
 
       {/* Loading indicator */}
       <Loader />
+
+      {/* Camera Selector (during launch only) */}
+      {showCameraSelector && (
+        <CameraSelector 
+          currentMode={cameraMode} 
+          onChange={setCameraMode} 
+        />
+      )}
 
       {/* Launch Control Panel */}
       {showControlPanel && <ControlPanel />}

@@ -68,7 +68,7 @@ export const R_EARTH = 6_371_000; // Earth radius in meters
  * - 100km altitude = 200 scene units (Karman line)
  * - 200km altitude = 400 scene units (orbital)
  */
-export const SCENE_SCALE = 1/10 ;
+export const SCENE_SCALE = 1 / 10;
 
 /**
  * Launch pad position in scene coordinates.
@@ -93,12 +93,14 @@ export function apiToScenePosition(
 ): [number, number, number] {
   // Convert from geocentric to altitude
   const altitude_m = apiX - R_EARTH;
-  
+
   // Apply scale and offset from pad position
   const sceneX = PAD_POSITION.x + apiY * SCENE_SCALE;  // Downrange → EAST
-  const sceneY = PAD_POSITION.y + altitude_m * SCENE_SCALE;  // Altitude → UP
+
+  // Add PAD_POSITION.y to ensure rocket starts at pad height, not at water level
+  const sceneY = PAD_POSITION.y + altitude_m * SCENE_SCALE;  // Altitude → UP (already correct)
   const sceneZ = 0;
-  
+
   return [sceneX, sceneY, sceneZ];
 }
 
@@ -115,10 +117,10 @@ export function apiToScenePosition(
 export function gammaToRotation(gamma_rad: number): [number, number, number] {
   // Clamp gamma to valid range [0, π/2] for safety
   const gamma_clamped = Math.max(0, Math.min(Math.PI / 2, gamma_rad));
-  
+
   // Rotation around Z axis
   const rotZ = gamma_clamped - Math.PI / 2;
-  
+
   return [0, 0, rotZ];
 }
 
@@ -130,29 +132,62 @@ export function lerp(a: number, b: number, t: number): number {
 }
 
 /**
- * Finds the index in a sorted array where value would be inserted.
- * Used for interpolating trajectory data.
+ * Catmull-Rom spline interpolation for smooth curves.
+ * Uses 4 control points for cubic interpolation.
+ * 
+ * @param p0 - Point before start
+ * @param p1 - Start point
+ * @param p2 - End point  
+ * @param p3 - Point after end
+ * @param t - Interpolation factor [0, 1]
+ * @returns Smoothly interpolated value
  */
-export function findTimeIndex(times: number[], t: number): number {
-  if (t <= times[0]) return 0;
-  if (t >= times[times.length - 1]) return times.length - 2;
-  
-  for (let i = 0; i < times.length - 1; i++) {
-    if (t >= times[i] && t < times[i + 1]) {
-      return i;
-    }
-  }
-  return times.length - 2;
+export function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
+  const t2 = t * t;
+  const t3 = t2 * t;
+
+  // Catmull-Rom basis functions
+  return 0.5 * (
+    (2 * p1) +
+    (-p0 + p2) * t +
+    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+    (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+  );
 }
 
 /**
- * Interpolates a trajectory value at a given time.
- * Uses linear interpolation between trajectory points.
+ * Finds the index in a sorted array where value would be inserted.
+ * Uses binary search for efficiency with large arrays.
+ */
+export function findTimeIndex(times: number[], t: number): number {
+  if (times.length === 0) return 0;
+  if (t <= times[0]) return 0;
+  if (t >= times[times.length - 1]) return times.length - 2;
+
+  // Binary search
+  let low = 0;
+  let high = times.length - 1;
+
+  while (low < high - 1) {
+    const mid = Math.floor((low + high) / 2);
+    if (times[mid] <= t) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return low;
+}
+
+/**
+ * Interpolates a trajectory value using Catmull-Rom spline.
+ * Falls back to linear interpolation at boundaries.
  * 
  * @param times - Array of time points [s]
  * @param values - Array of values corresponding to times
  * @param t - Time to interpolate at [s]
- * @returns Interpolated value
+ * @returns Smoothly interpolated value
  */
 export function interpolateValue(
   times: number[],
@@ -160,17 +195,22 @@ export function interpolateValue(
   t: number
 ): number {
   if (times.length === 0 || values.length === 0) return 0;
+  if (times.length === 1) return values[0];
   if (t <= times[0]) return values[0];
   if (t >= times[times.length - 1]) return values[values.length - 1];
-  
+
   const i = findTimeIndex(times, t);
   const t0 = times[i];
   const t1 = times[i + 1];
-  const v0 = values[i];
-  const v1 = values[i + 1];
-  
   const alpha = (t - t0) / (t1 - t0);
-  return lerp(v0, v1, alpha);
+
+  // Use Catmull-Rom if we have enough points, otherwise linear
+  if (i > 0 && i < times.length - 2) {
+    return catmullRom(values[i - 1], values[i], values[i + 1], values[i + 2], alpha);
+  }
+
+  // Linear fallback at boundaries
+  return lerp(values[i], values[i + 1], alpha);
 }
 
 /**
@@ -236,9 +276,9 @@ export function calculateGForce(
   const v2 = interpolateValue(times, velocities, t + dt);
   const dv = v2 - v1;
   const acceleration = dv / (2 * dt);
-  
+
   // Include gravity (approximately 1G at surface, decreasing with altitude)
   const totalAcceleration = acceleration + 9.81;
-  
+
   return Math.abs(totalAcceleration) / 9.81;
 }

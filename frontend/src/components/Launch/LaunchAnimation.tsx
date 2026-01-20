@@ -6,7 +6,9 @@ import {
   interpolatePosition,
   interpolateRotation,
   getTrajectoryDuration,
+  interpolateValue,
 } from '../../utils/coordinateTransform';
+import { PropulsionFX } from './PropulsionFX';
 
 /**
  * LaunchAnimation Component
@@ -32,6 +34,11 @@ import {
  * 3. TIME SCALING:
  *    - Animation runs at configurable speed (default 10x real-time)
  *    - Smooth interpolation between trajectory points
+ * 
+ * 4. PROPULSION EFFECTS:
+ *    - Stage 1: 9 engines, orange flames
+ *    - Stage 2: 1 engine, blue-white plume
+ *    - Automatic stage detection from mass discontinuity
  */
 
 interface LaunchAnimationProps {
@@ -54,14 +61,32 @@ export function LaunchAnimation({
     setAnimationTime,
     setIsPlaying,
     setScene,
+    enginesActive,
+    setEnginesActive,
+    currentStage,
+    setCurrentStage,
   } = useSimulationStore();
 
   // Extract trajectory data
   const trajectory = launchData?.trajectory;
   
-  // Memoize trajectory arrays
+  // Memoize trajectory arrays and stage separation detection
   const trajectoryData = useMemo(() => {
     if (!trajectory) return null;
+    
+    // Detect stage separation time from mass discontinuity
+    let stageSepTime = 144; // Default estimate
+    if (trajectory.m_kg) {
+      for (let i = 1; i < trajectory.m_kg.length; i++) {
+        const massDrop = trajectory.m_kg[i - 1] - trajectory.m_kg[i];
+        const dt = trajectory.t_s[i] - trajectory.t_s[i - 1];
+        if (massDrop > 10000 && dt < 2) {
+          stageSepTime = trajectory.t_s[i];
+          break;
+        }
+      }
+    }
+    
     return {
       times: trajectory.t_s,
       posX: trajectory.pos_m.x,
@@ -69,7 +94,9 @@ export function LaunchAnimation({
       gammas: trajectory.gamma_rad,
       velocities: trajectory.v_mps,
       altitudes: trajectory.h_m,
+      masses: trajectory.m_kg,
       duration: getTrajectoryDuration(trajectory.t_s),
+      stageSepTime,
     };
   }, [trajectory]);
 
@@ -88,12 +115,23 @@ export function LaunchAnimation({
     if (newTime >= trajectoryData.duration) {
       setAnimationTime(trajectoryData.duration);
       setIsPlaying(false);
+      setEnginesActive(false);
       setScene('orbit');
       return;
     }
 
     // Update time in store
     setAnimationTime(newTime);
+    
+    // Activate engines at liftoff
+    if (newTime > 0 && !enginesActive) {
+      setEnginesActive(true);
+    }
+    
+    // Detect stage separation
+    if (newTime >= trajectoryData.stageSepTime && currentStage === 1) {
+      setCurrentStage(2);
+    }
 
     // Update rocket position and rotation
     if (groupRef.current) {
@@ -137,6 +175,12 @@ export function LaunchAnimation({
     0
   );
 
+  // Calculate thrust level (decays slightly with altitude due to back-pressure)
+  const currentAltitude = trajectoryData.altitudes 
+    ? interpolateValue(trajectoryData.times, trajectoryData.altitudes, animationTime)
+    : 0;
+  const thrustLevel = Math.min(1, 0.8 + (currentAltitude / 100000) * 0.2);
+
   return (
     <group
       ref={groupRef}
@@ -144,6 +188,17 @@ export function LaunchAnimation({
       rotation={isPlaying ? undefined : initialRotation}
     >
       {children}
+      
+      {/* Propulsion Effects - positioned at engine bell */}
+      <PropulsionFX
+        active={enginesActive}
+        stage={currentStage}
+        thrust={thrustLevel}
+        position={[0, -2, 0]}  // Below rocket base
+        scale={2}
+        altitude={currentAltitude}
+      />
     </group>
   );
 }
+
