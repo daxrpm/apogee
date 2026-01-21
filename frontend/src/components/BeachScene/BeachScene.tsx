@@ -60,12 +60,13 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
         camera={{
           position: [0, 60, 250],
           fov: 55,
-          near: 1,
+          near: 0.5,
           far: 150000,
         }}
         gl={{
-          antialias: false,
+          antialias: true,
           alpha: false,
+          logarithmicDepthBuffer: true,
           powerPreference: 'high-performance',
         }}
       >

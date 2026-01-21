@@ -14,6 +14,8 @@
 import { useRef, useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { OrbitControls } from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { useSimulationStore } from '../../stores/simulationStore';
 import { interpolatePosition, interpolateValue, R_EARTH } from '../../utils/coordinateTransform';
 
@@ -44,6 +46,7 @@ interface LaunchCameraProps {
 
 export function LaunchCamera({ mode }: LaunchCameraProps) {
   const { camera } = useThree();
+  const controlsRef = useRef<OrbitControlsImpl>(null);
   const targetRef = useRef(new THREE.Vector3());
   const positionRef = useRef(new THREE.Vector3());
   
@@ -56,7 +59,7 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
   }, [trajectory]);
 
   useFrame(() => {
-    if (!trajectory || !downrangeM) return;
+    if (!trajectory || !downrangeM || !controlsRef.current) return;
 
     // Get current rocket position
     const [rocketX, rocketY, rocketZ] = interpolatePosition(
@@ -67,89 +70,67 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
     );
     
     const rocketPos = new THREE.Vector3(rocketX, rocketY, rocketZ);
-    
-    // Get altitude for camera distance scaling
-    const altitude = interpolateValue(trajectory.t_s, trajectory.h_m, animationTime);
+
+    const gamma = trajectory.gamma_rad
+      ? interpolateValue(trajectory.t_s, trajectory.gamma_rad, animationTime)
+      : Math.PI / 2;
+    const rocketAxis = new THREE.Vector3(Math.cos(gamma), Math.sin(gamma), 0).normalize();
+    const ROCKET_HALF_LENGTH = 7;
+    const rocketTail = rocketPos.clone().add(rocketAxis.clone().multiplyScalar(-ROCKET_HALF_LENGTH));
     
     // Calculate target camera position based on mode
-    let targetPosition: THREE.Vector3;
     let lookAt: THREE.Vector3;
+
+    const TARGET_OFFSET_Y = 4.5;
     
     switch (mode) {
       case 'chase': {
         // Behind and slightly above the rocket
-        const chaseDistance = 20 + Math.min(altitude / 5000, 50);
-        targetPosition = new THREE.Vector3(
-          rocketX - chaseDistance * 0.8,
-          rocketY + chaseDistance * 0.3,
-          rocketZ + chaseDistance * 0.2
-        );
-        lookAt = rocketPos;
+        lookAt = rocketPos.clone().add(new THREE.Vector3(0, TARGET_OFFSET_Y, 0));
         break;
       }
         
       case 'side': {
         // Lateral view, parallel to flight path
-        const sideDistance = 30 + Math.min(altitude / 3000, 100);
-        targetPosition = new THREE.Vector3(
-          rocketX,
-          rocketY,
-          sideDistance
-        );
-        lookAt = rocketPos;
+        lookAt = rocketPos.clone().add(new THREE.Vector3(0, TARGET_OFFSET_Y, 0));
         break;
       }
         
       case 'ground':
         // Fixed at launch pad, looking up
-        targetPosition = new THREE.Vector3(0, 5, 50);
-        lookAt = rocketPos;
+        lookAt = rocketPos.clone().add(new THREE.Vector3(0, TARGET_OFFSET_Y, 0));
         break;
         
       case 'wide': {
         // Far away cinematic view
-        const wideDistance = 100 + Math.min(altitude / 1000, 300);
-        targetPosition = new THREE.Vector3(
-          -wideDistance * 0.5,
-          wideDistance * 0.3,
-          wideDistance * 0.4
-        );
-        lookAt = rocketPos;
+        lookAt = rocketPos.clone().add(new THREE.Vector3(0, TARGET_OFFSET_Y, 0));
         break;
       }
         
       case 'onboard':
         // From rocket TIP looking DOWN at engines (SpaceX style)
-        targetPosition = new THREE.Vector3(
-          rocketX,
-          rocketY + 5,  // Above rocket
-          rocketZ
-        );
         // Look straight down at the engines
-        lookAt = new THREE.Vector3(
-          rocketX,
-          rocketY - 3,  // Below rocket (at engines)
-          rocketZ
-        );
+        lookAt = rocketTail;
         break;
         
       default:
-        targetPosition = positionRef.current;
-        lookAt = rocketPos;
+        lookAt = rocketPos.clone().add(new THREE.Vector3(0, TARGET_OFFSET_Y, 0));
     }
     
-    // Smooth camera movement - higher lerp factor prevents jittering at high speed
-    const lerpFactor = mode === 'ground' ? 0.02 : 0.12;  // Increased from 0.05 to 0.12
-    positionRef.current.lerp(targetPosition, lerpFactor);
+    // Smooth follow for the target. Camera translation follows the target so user orbit stays stable.
+    const lerpFactor = mode === 'ground' ? 0.02 : 0.12;
+    const prevTarget = targetRef.current.clone();
     targetRef.current.lerp(lookAt, lerpFactor);
-    
-    camera.position.copy(positionRef.current);
-    camera.lookAt(targetRef.current);
+
+    const deltaTarget = targetRef.current.clone().sub(prevTarget);
+    camera.position.add(deltaTarget);
+    controlsRef.current.target.copy(targetRef.current);
+    controlsRef.current.update();
   });
 
   // Initialize camera position on mode change
   useEffect(() => {
-    if (!trajectory || !downrangeM) return;
+    if (!trajectory || !downrangeM || !controlsRef.current) return;
     
     const [x, y, z] = interpolatePosition(
       trajectory.t_s,
@@ -158,31 +139,59 @@ export function LaunchCamera({ mode }: LaunchCameraProps) {
       animationTime
     );
     
-    targetRef.current.set(x, y, z);
+    const TARGET_OFFSET_Y = 4.5;
+    const gamma = trajectory.gamma_rad
+      ? interpolateValue(trajectory.t_s, trajectory.gamma_rad, animationTime)
+      : Math.PI / 2;
+    const rocketAxis = new THREE.Vector3(Math.cos(gamma), Math.sin(gamma), 0).normalize();
+    const ROCKET_HALF_LENGTH = 7;
+    const rocketPos = new THREE.Vector3(x, y, z);
+    const rocketTip = rocketPos.clone().add(rocketAxis.clone().multiplyScalar(ROCKET_HALF_LENGTH));
+    const rocketTail = rocketPos.clone().add(rocketAxis.clone().multiplyScalar(-ROCKET_HALF_LENGTH));
+    const rocketRight = new THREE.Vector3().crossVectors(rocketAxis, new THREE.Vector3(0, 0, 1)).normalize();
+
+    targetRef.current.copy(mode === 'onboard' ? rocketTail : new THREE.Vector3(x, y + TARGET_OFFSET_Y, z));
+    controlsRef.current.target.copy(targetRef.current);
     
     switch (mode) {
       case 'chase':
         positionRef.current.set(x - 30, y + 15, z + 10);
         break;
       case 'side':
-        positionRef.current.set(x, y, 50);
+        positionRef.current.set(x, y + 10, 70);
         break;
       case 'ground':
         positionRef.current.set(0, 5, 50);
         break;
       case 'wide':
-        positionRef.current.set(-100, 60, 80);
+        positionRef.current.set(-120, 80, 120);
         break;
       case 'onboard':
-        positionRef.current.set(x, y + 1, z + 5);
+        positionRef.current.copy(
+          rocketTip
+            .clone()
+            .add(rocketAxis.clone().multiplyScalar(2.5))
+            .add(rocketRight.multiplyScalar(1.0))
+        );
         break;
     }
     
     camera.position.copy(positionRef.current);
-    camera.lookAt(targetRef.current);
+    controlsRef.current.update();
   }, [mode, trajectory, downrangeM, animationTime, camera]);
 
-  return null;
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      enableDamping
+      dampingFactor={0.05}
+      enableRotate
+      enableZoom
+      enablePan
+      minDistance={5}
+      maxDistance={150000}
+    />
+  );
 }
 
 // ============ CAMERA SELECTOR UI ============

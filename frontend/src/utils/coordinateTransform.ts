@@ -73,7 +73,7 @@ export const SCENE_SCALE = 1 / 10;
  * This is the origin for the rocket's initial position.
  */
 export const PAD_POSITION = {
-  x: 0,
+  x: -0.5,
   y: 2, // Slightly above ground
   z: 0,
 };
@@ -90,7 +90,7 @@ export function apiToScenePosition(
   downrange_m: number
 ): [number, number, number] {
   // Convert from geocentric to altitude
-  const altitude_m = r_m - R_EARTH;
+  const altitude_m = Math.max(0, r_m - R_EARTH);
 
   // Apply scale and offset from pad position
   const sceneX = PAD_POSITION.x + downrange_m * SCENE_SCALE;  // Downrange → EAST

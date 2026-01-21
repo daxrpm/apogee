@@ -138,7 +138,7 @@ export function PropulsionFX({
 
   // Colors based on stage
   const particleColor = stage === 1 ? '#ff5500' : '#99ccff';
-  const particleSize = (stage === 1 ? 0.12 : 0.08) * thrust;
+  const particleSize = (stage === 1 ? 0.18 : 0.11) * thrust;
 
   if (!active) return null;
 
@@ -209,8 +209,8 @@ function FlameCore({ stage, thrust }: { stage: 1 | 2; thrust: number }) {
     }
   });
 
-  const coneLength = stage === 1 ? 4 : 2;
-  const coneRadius = stage === 1 ? 1.0 : 0.4;
+  const coneLength = stage === 1 ? 6 : 3;
+  const coneRadius = stage === 1 ? 1.3 : 0.6;
   const coreColor = stage === 1 ? '#ffcc00' : '#aaddff';
   const midColor = stage === 1 ? '#ff6600' : '#6699ff';
   const outerColor = stage === 1 ? '#ff2200' : '#3366cc';
