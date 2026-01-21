@@ -62,25 +62,27 @@ const styles = {
 
 function App() {
   const { currentScene, nextScene, skipToBeach, hasSeenIntro } = useSimulationStore();
-  const [isUserInteracting, setIsUserInteracting] = useState(false);
+  const [interactionScene, setInteractionScene] = useState<SceneType | null>(null);
 
   const isIntroScene = INTRO_SCENES.includes(currentScene);
+  const isUserInteracting = interactionScene === currentScene;
 
   const handleInteractionChange = useCallback((isInteracting: boolean) => {
-    setIsUserInteracting(isInteracting);
-  }, []);
+    setInteractionScene(isInteracting ? currentScene : null);
+  }, [currentScene]);
 
   // Skip intro on reload if already seen
   useEffect(() => {
-    if (hasSeenIntro && isIntroScene) {
-      skipToBeach();
-    }
-  }, [hasSeenIntro, isIntroScene, skipToBeach]);
+    if (!hasSeenIntro || !isIntroScene) return;
 
-  // Reset interaction state on scene change
-  useEffect(() => {
-    setIsUserInteracting(false);
-  }, [currentScene]);
+    const timeoutId = window.setTimeout(() => {
+      skipToBeach();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [hasSeenIntro, isIntroScene, skipToBeach]);
 
   return (
     <div style={styles.container}>
