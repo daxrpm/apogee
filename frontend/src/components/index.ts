@@ -9,7 +9,7 @@
  */
 
 // Feature modules
-export * from './BeachScene';
-export * from './Launch';
-export * from './Navigation';
-export * from './Terrain';
+export * from '../features/beach';
+export * from '../features/launch';
+export * from '../features/navigation';
+export * from '../shared/terrain';

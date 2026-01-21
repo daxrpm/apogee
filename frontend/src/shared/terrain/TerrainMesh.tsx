@@ -22,6 +22,14 @@ import {
 } from 'three';
 import { REGIONS, type RegionId, type TextureOption } from '../../types';
 
+function createSeededRandom(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (1664525 * s + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
 // ============ COMPONENT PROPS ============
 
 interface TerrainMeshProps {
@@ -159,6 +167,7 @@ export function TerrainMesh({
   // ===== PROCEDURAL DETAIL TEXTURE =====
 
   const detailTexture = useMemo(() => {
+    const rand = createSeededRandom(1337);
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 512;
@@ -170,9 +179,9 @@ export function TerrainMesh({
       
       // Add noise for surface detail
       for (let i = 0; i < 50000; i++) {
-        const x = Math.random() * 512;
-        const y = Math.random() * 512;
-        const gray = Math.floor(Math.random() * 50) + 100;
+        const x = rand() * 512;
+        const y = rand() * 512;
+        const gray = Math.floor(rand() * 50) + 100;
         ctx.fillStyle = `rgba(${gray},${gray},${gray},0.1)`;
         ctx.fillRect(x, y, 2, 2);
       }

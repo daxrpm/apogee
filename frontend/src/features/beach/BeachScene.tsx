@@ -10,10 +10,14 @@ import { LaunchPad } from './LaunchPad';
 import { Falcon9Rocket, type Falcon9RocketRef } from './Falcon9Rocket';
 import { PalmForest, Seagulls } from './Vegetation';
 import { ControlPanel } from './ControlPanel';
-import { LaunchAnimation } from '../Launch/LaunchAnimation';
-import { RocketCamera } from '../Launch/RocketCamera';
-import { Telemetry } from '../Launch/Telemetry';
-import { LaunchCamera, CameraSelector, type CameraMode } from '../Launch/CameraSystem';
+import {
+  LaunchAnimation,
+  RocketCamera,
+  Telemetry,
+  LaunchCamera,
+  CameraSelector,
+  type CameraMode,
+} from '../launch';
 
 // Store
 import { useSimulationStore } from '../../stores/simulationStore';

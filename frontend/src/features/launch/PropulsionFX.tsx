@@ -11,10 +11,26 @@
  * @module Launch/PropulsionFX
  */
 
-import { useRef, useMemo, useState, useEffect } from 'react';
+import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Points, PointMaterial } from '@react-three/drei';
 import * as THREE from 'three';
+
+function createSeededRandom(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (1664525 * s + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function hash01(a: number, b: number) {
+  let x = (a ^ (b + 0x9e3779b9)) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x85ebca6b) >>> 0;
+  x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35) >>> 0;
+  x = (x ^ (x >>> 16)) >>> 0;
+  return x / 4294967296;
+}
 
 // ============ CONSTANTS ============
 
@@ -49,18 +65,15 @@ export function PropulsionFX({
 }: PropulsionFXProps) {
   const pointsRef = useRef<THREE.Points>(null);
   const particleCount = stage === 1 ? STAGE1_EXHAUST_PARTICLES : STAGE2_EXHAUST_PARTICLES;
+  const spawnCounterRef = useRef<Uint32Array>(new Uint32Array(0));
+  const lifetimesRef = useRef<Float32Array | null>(null);
 
   // Track if this is initial launch for smoke effect
-  const [isInitialLaunch, setIsInitialLaunch] = useState(true);
-  
-  useEffect(() => {
-    if (altitude > 500) {
-      setIsInitialLaunch(false);
-    }
-  }, [altitude]);
+  const isInitialLaunch = altitude <= 500;
 
   // Generate initial particle data
-  const [positions, velocities, lifetimes] = useMemo(() => {
+  const { positions, velocities, lifetimesSeed } = useMemo(() => {
+    const rand = createSeededRandom(stage === 1 ? 1001 : 2001);
     const pos = new Float32Array(particleCount * 3);
     const vel = new Float32Array(particleCount * 3);
     const life = new Float32Array(particleCount);
@@ -69,29 +82,37 @@ export function PropulsionFX({
       const i3 = i * 3;
       
       // Random starting position in exhaust cone
-      const angle = Math.random() * Math.PI * 2;
-      const radius = Math.random() * 0.4 * (stage === 1 ? 1.8 : 0.6);
+      const angle = rand() * Math.PI * 2;
+      const radius = rand() * 0.4 * (stage === 1 ? 1.8 : 0.6);
       
       pos[i3] = Math.cos(angle) * radius;
-      pos[i3 + 1] = -Math.random() * 0.5;
+      pos[i3 + 1] = -rand() * 0.5;
       pos[i3 + 2] = Math.sin(angle) * radius;
       
       // Velocity - strong downward with turbulent spread
       const spread = stage === 1 ? 0.4 : 0.2;
-      vel[i3] = (Math.random() - 0.5) * spread;
-      vel[i3 + 1] = -(Math.random() * 0.6 + 0.4); // Downward
-      vel[i3 + 2] = (Math.random() - 0.5) * spread;
+      vel[i3] = (rand() - 0.5) * spread;
+      vel[i3 + 1] = -(rand() * 0.6 + 0.4); // Downward
+      vel[i3 + 2] = (rand() - 0.5) * spread;
       
       // Random lifetime phase for continuous stream
-      life[i] = Math.random();
+      life[i] = rand();
     }
 
-    return [pos, vel, life];
+    return { positions: pos, velocities: vel, lifetimesSeed: life };
   }, [particleCount, stage]);
+
+  useEffect(() => {
+    spawnCounterRef.current = new Uint32Array(particleCount);
+    lifetimesRef.current = new Float32Array(lifetimesSeed);
+  }, [particleCount, lifetimesSeed]);
 
   // Animate particles each frame
   useFrame((state, delta) => {
     if (!pointsRef.current || !active) return;
+
+    const lifetimes = lifetimesRef.current;
+    if (!lifetimes) return;
 
     const positionAttr = pointsRef.current.geometry.attributes.position;
     const posArray = positionAttr.array as Float32Array;
@@ -101,22 +122,24 @@ export function PropulsionFX({
       const i3 = i * 3;
       
       // Update lifetime
-      lifetimes[i] += delta * (1.5 + Math.random() * 0.5);
+      lifetimes[i] += delta * (1.5 + hash01(i, spawnCounterRef.current[i] + 17) * 0.5);
       
       // Reset particle when lifetime exceeds 1
       if (lifetimes[i] > 1) {
         lifetimes[i] = 0;
+        spawnCounterRef.current[i] = (spawnCounterRef.current[i] + 1) >>> 0;
         
         // Reset to nozzle position with random spread
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * 0.3 * (stage === 1 ? 1.5 : 0.5);
+        const spawnId = spawnCounterRef.current[i];
+        const angle = hash01(i, spawnId) * Math.PI * 2;
+        const radius = hash01(i, spawnId + 1) * 0.3 * (stage === 1 ? 1.5 : 0.5);
         
         posArray[i3] = Math.cos(angle) * radius;
-        posArray[i3 + 1] = -Math.random() * 0.3;
+        posArray[i3 + 1] = -hash01(i, spawnId + 2) * 0.3;
         posArray[i3 + 2] = Math.sin(angle) * radius;
       } else {
         // Move particle with velocity and turbulence
-        const speed = (2.5 + Math.random()) * thrust * delta * 35;
+        const speed = (2.5 + hash01(i, 1234)) * thrust * delta * 35;
         
         // Add turbulence for realistic chaotic motion
         const turbX = Math.sin(time * 15 + i * 0.1) * 0.03;
@@ -197,9 +220,9 @@ function FlameCore({ stage, thrust }: { stage: 1 | 2; thrust: number }) {
       // Intense flicker effect
       const flicker = 0.85 + Math.sin(time * 40) * 0.1 + Math.sin(time * 67) * 0.05;
       const pulse = 1 + Math.sin(time * 8) * 0.1;
-      meshRef.current.scale.y = (1.2 + Math.random() * 0.3) * thrust * flicker * pulse;
+      meshRef.current.scale.y = (1.2 + (Math.sin(time * 91) * 0.5 + 0.5) * 0.3) * thrust * flicker * pulse;
       meshRef.current.scale.x = meshRef.current.scale.z = 
-        (0.9 + Math.random() * 0.2) * thrust * flicker;
+        (0.9 + (Math.sin(time * 97) * 0.5 + 0.5) * 0.2) * thrust * flicker;
     }
     
     if (glowRef.current) {
@@ -330,9 +353,12 @@ function MachDiamonds({ thrust, altitude }: { thrust: number; altitude: number }
 
 function LaunchPadSmoke({ active, thrust }: { active: boolean; thrust: number }) {
   const pointsRef = useRef<THREE.Points>(null);
+  const spawnCounterRef = useRef<Uint32Array>(new Uint32Array(0));
+  const lifetimesRef = useRef<Float32Array | null>(null);
   
   // Generate smoke particles spreading outward from pad
-  const [positions, velocities, lifetimes] = useMemo(() => {
+  const { positions, velocities, lifetimesSeed } = useMemo(() => {
+    const rand = createSeededRandom(3001);
     const count = LAUNCH_SMOKE_PARTICLES;
     const pos = new Float32Array(count * 3);
     const vel = new Float32Array(count * 3);
@@ -342,27 +368,35 @@ function LaunchPadSmoke({ active, thrust }: { active: boolean; thrust: number })
       const i3 = i * 3;
       
       // Start at ground level, spread in a wide circle
-      const angle = Math.random() * Math.PI * 2;
-      const radius = Math.random() * 2;
+      const angle = rand() * Math.PI * 2;
+      const radius = rand() * 2;
       
       pos[i3] = Math.cos(angle) * radius;
-      pos[i3 + 1] = -5 + Math.random() * 2; // Below rocket, at ground
+      pos[i3 + 1] = -5 + rand() * 2; // Below rocket, at ground
       pos[i3 + 2] = Math.sin(angle) * radius;
       
       // Velocity - outward and upward (mushroom cloud effect)
-      const outSpeed = 0.5 + Math.random() * 0.5;
+      const outSpeed = 0.5 + rand() * 0.5;
       vel[i3] = Math.cos(angle) * outSpeed;
-      vel[i3 + 1] = 0.2 + Math.random() * 0.3; // Slowly rising
+      vel[i3 + 1] = 0.2 + rand() * 0.3; // Slowly rising
       vel[i3 + 2] = Math.sin(angle) * outSpeed;
       
-      life[i] = Math.random();
+      life[i] = rand();
     }
 
-    return [pos, vel, life];
+    return { positions: pos, velocities: vel, lifetimesSeed: life };
   }, []);
+
+  useEffect(() => {
+    spawnCounterRef.current = new Uint32Array(LAUNCH_SMOKE_PARTICLES);
+    lifetimesRef.current = new Float32Array(lifetimesSeed);
+  }, [lifetimesSeed]);
 
   useFrame((state, delta) => {
     if (!pointsRef.current || !active) return;
+
+    const lifetimes = lifetimesRef.current;
+    if (!lifetimes) return;
 
     const positionAttr = pointsRef.current.geometry.attributes.position;
     const posArray = positionAttr.array as Float32Array;
@@ -375,13 +409,15 @@ function LaunchPadSmoke({ active, thrust }: { active: boolean; thrust: number })
       
       if (lifetimes[i] > 1) {
         lifetimes[i] = 0;
+        spawnCounterRef.current[i] = (spawnCounterRef.current[i] + 1) >>> 0;
         
         // Reset near center
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * 1.5;
+        const spawnId = spawnCounterRef.current[i];
+        const angle = hash01(i, spawnId) * Math.PI * 2;
+        const radius = hash01(i, spawnId + 1) * 1.5;
         
         posArray[i3] = Math.cos(angle) * radius;
-        posArray[i3 + 1] = -5 + Math.random();
+        posArray[i3 + 1] = -5 + hash01(i, spawnId + 2);
         posArray[i3 + 2] = Math.sin(angle) * radius;
       } else {
         // Expand outward with turbulence
@@ -393,8 +429,7 @@ function LaunchPadSmoke({ active, thrust }: { active: boolean; thrust: number })
         posArray[i3 + 2] += velocities[i3 + 2] * speed * (1 + turbulence);
         
         // Slow down over time (drag)
-        velocities[i3] *= 0.995;
-        velocities[i3 + 2] *= 0.995;
+        // Intentionally keep base velocity constant; drag is approximated by the slow aging rate.
       }
     }
 
@@ -424,32 +459,32 @@ interface SmokeTrailProps {
 
 export function SmokeTrail({ active, rocketPosition }: SmokeTrailProps) {
   const pointsRef = useRef<THREE.Points>(null);
-  const trailPositions = useRef<Float32Array>(new Float32Array(500 * 3));
+  const trailPositions = useMemo(() => new Float32Array(500 * 3), []);
   const trailIndex = useRef(0);
   const lastUpdateTime = useRef(0);
 
   useFrame((state) => {
     if (!pointsRef.current) return;
 
+    const posAttr = pointsRef.current.geometry.attributes.position;
+    const posArray = posAttr.array as Float32Array;
+
     // Add new trail point every 30ms for denser trail
     if (active && state.clock.elapsedTime - lastUpdateTime.current > 0.03) {
       lastUpdateTime.current = state.clock.elapsedTime;
 
       const i = (trailIndex.current % 150) * 3;
-      trailPositions.current[i] = rocketPosition[0] + (Math.random() - 0.5) * 0.8;
-      trailPositions.current[i + 1] = rocketPosition[1] - 3;
-      trailPositions.current[i + 2] = rocketPosition[2] + (Math.random() - 0.5) * 0.8;
+      posArray[i] = rocketPosition[0] + (hash01(trailIndex.current, 9001) - 0.5) * 0.8;
+      posArray[i + 1] = rocketPosition[1] - 3;
+      posArray[i + 2] = rocketPosition[2] + (hash01(trailIndex.current, 9002) - 0.5) * 0.8;
 
       trailIndex.current++;
+      posAttr.needsUpdate = true;
     }
-
-    const posAttr = pointsRef.current.geometry.attributes.position;
-    (posAttr.array as Float32Array).set(trailPositions.current);
-    posAttr.needsUpdate = true;
   });
 
   return (
-    <Points ref={pointsRef} positions={trailPositions.current} stride={3} frustumCulled={false}>
+    <Points ref={pointsRef} positions={trailPositions} stride={3} frustumCulled={false}>
       <PointMaterial
         transparent
         color="#aaaaaa"
@@ -495,6 +530,7 @@ export function StageSeparationFX({
 
   // Generate initial particle data - ring around separation plane
   const [positions, velocities] = useMemo(() => {
+    const rand = createSeededRandom(4001);
     const pos = new Float32Array(SEPARATION_PARTICLES * 3);
     const vel = new Float32Array(SEPARATION_PARTICLES * 3);
 
@@ -503,17 +539,17 @@ export function StageSeparationFX({
       
       // Start in a ring around the interstage
       const angle = (i / SEPARATION_PARTICLES) * Math.PI * 2;
-      const radius = 0.8 + Math.random() * 0.3;
+      const radius = 0.8 + rand() * 0.3;
       
       pos[i3] = Math.cos(angle) * radius;
-      pos[i3 + 1] = (Math.random() - 0.5) * 0.3; // Thin band
+      pos[i3 + 1] = (rand() - 0.5) * 0.3; // Thin band
       pos[i3 + 2] = Math.sin(angle) * radius;
       
       // Velocity - outward from center with some randomness
-      const outSpeed = 2 + Math.random() * 2;
-      vel[i3] = Math.cos(angle) * outSpeed + (Math.random() - 0.5) * 0.5;
-      vel[i3 + 1] = (Math.random() - 0.5) * 1.5; // Some vertical spread
-      vel[i3 + 2] = Math.sin(angle) * outSpeed + (Math.random() - 0.5) * 0.5;
+      const outSpeed = 2 + rand() * 2;
+      vel[i3] = Math.cos(angle) * outSpeed + (rand() - 0.5) * 0.5;
+      vel[i3 + 1] = (rand() - 0.5) * 1.5; // Some vertical spread
+      vel[i3 + 2] = Math.sin(angle) * outSpeed + (rand() - 0.5) * 0.5;
     }
 
     return [pos, vel];

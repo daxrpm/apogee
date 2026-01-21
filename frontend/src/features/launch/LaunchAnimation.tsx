@@ -12,7 +12,7 @@ import {
   SCENE_SCALE,
 } from '../../utils/coordinateTransform';
 import { PropulsionFX } from './PropulsionFX';
-import { Falcon9Rocket, type Falcon9RocketRef } from '../BeachScene/Falcon9Rocket';
+import { Falcon9Rocket, type Falcon9RocketRef } from '../beach';
 
 /**
  * LaunchAnimation Component

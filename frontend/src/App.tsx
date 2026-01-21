@@ -8,12 +8,12 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import { BeachScene } from './components/BeachScene';
+import { BeachScene } from './features/beach';
 import { 
   SceneTransition,
   ProgressTimer,
   NavigationTerrainScene,
-} from './components/Navigation';
+} from './features/navigation';
 import { useSimulationStore } from './stores/simulationStore';
 import { SCENE_INFO, type SceneType } from './types';
 

@@ -11,7 +11,7 @@ import { Suspense, useRef, useEffect, useState, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, Stars, Loader } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { TerrainMesh } from '../Terrain';
+import { TerrainMesh } from '../../shared/terrain';
 import { 
   REGIONS, 
   TEXTURE_OPTIONS, 

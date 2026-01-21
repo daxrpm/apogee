@@ -14,6 +14,14 @@ import { Water } from 'three/examples/jsm/objects/Water.js';
 import { useGLTF } from '@react-three/drei';
 import type { GLTF } from 'three-stdlib';
 
+function createSeededRandom(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (1664525 * s + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
 interface OceanWaterProps {
   position?: [number, number, number];
   sunDirection?: Vector3;
@@ -94,6 +102,7 @@ export function BeachSand({
 
   // Create procedural sand texture with color #ada291
   const sandTexture = useMemo(() => {
+    const rand = createSeededRandom(2025);
     const canvas = document.createElement('canvas');
     canvas.width = 1024;
     canvas.height = 1024;
@@ -110,22 +119,22 @@ export function BeachSand({
 
     // Add grain noise for sand texture
     for (let i = 0; i < 100000; i++) {
-      const x = Math.random() * 1024;
-      const y = Math.random() * 1024;
+      const x = rand() * 1024;
+      const y = rand() * 1024;
       // Variations around #ada291
-      const r = 173 + Math.floor(Math.random() * 30 - 15);
-      const g = 162 + Math.floor(Math.random() * 30 - 15);
-      const b = 145 + Math.floor(Math.random() * 30 - 15);
-      const alpha = Math.random() * 0.3;
+      const r = 173 + Math.floor(rand() * 30 - 15);
+      const g = 162 + Math.floor(rand() * 30 - 15);
+      const b = 145 + Math.floor(rand() * 30 - 15);
+      const alpha = rand() * 0.3;
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-      ctx.fillRect(x, y, Math.random() * 3 + 1, Math.random() * 3 + 1);
+      ctx.fillRect(x, y, rand() * 3 + 1, rand() * 3 + 1);
     }
 
     // Add some darker patches (wet sand near water)
     for (let i = 0; i < 80; i++) {
-      const x = Math.random() * 1024;
-      const y = Math.random() * 250; // Near water edge
-      const radius = Math.random() * 60 + 15;
+      const x = rand() * 1024;
+      const y = rand() * 250; // Near water edge
+      const radius = rand() * 60 + 15;
       const gradient2 = ctx.createRadialGradient(x, y, 0, x, y, radius);
       gradient2.addColorStop(0, 'rgba(120, 110, 95, 0.35)');
       gradient2.addColorStop(1, 'rgba(120, 110, 95, 0)');
@@ -141,6 +150,7 @@ export function BeachSand({
 
   // Create sand bump map
   const bumpMap = useMemo(() => {
+    const rand = createSeededRandom(2026);
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 512;
@@ -151,9 +161,9 @@ export function BeachSand({
 
     // Add noise for sand grain bump
     for (let i = 0; i < 50000; i++) {
-      const x = Math.random() * 512;
-      const y = Math.random() * 512;
-      const gray = Math.floor(Math.random() * 60) + 100;
+      const x = rand() * 512;
+      const y = rand() * 512;
+      const gray = Math.floor(rand() * 60) + 100;
       ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
       ctx.fillRect(x, y, 2, 2);
     }

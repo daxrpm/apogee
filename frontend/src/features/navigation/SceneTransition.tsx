@@ -29,19 +29,29 @@ export function SceneTransition({
   const [opacity, setOpacity] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
   const elapsedRef = useRef(0);
-  const lastTickRef = useRef(Date.now());
+  const lastTickRef = useRef(0);
 
   // Fade in/out
   useEffect(() => {
     if (isActive) {
-      setIsVisible(true);
+      const visibleTimer = window.setTimeout(() => {
+        setIsVisible(true);
+      }, 0);
       elapsedRef.current = 0;
-      const timer = setTimeout(() => setOpacity(1), 50);
-      return () => clearTimeout(timer);
+      const timer = window.setTimeout(() => setOpacity(1), 50);
+      return () => {
+        window.clearTimeout(visibleTimer);
+        window.clearTimeout(timer);
+      };
     } else {
-      setOpacity(0);
-      const timer = setTimeout(() => setIsVisible(false), fadeDuration);
-      return () => clearTimeout(timer);
+      const opacityTimer = window.setTimeout(() => {
+        setOpacity(0);
+      }, 0);
+      const timer = window.setTimeout(() => setIsVisible(false), fadeDuration);
+      return () => {
+        window.clearTimeout(opacityTimer);
+        window.clearTimeout(timer);
+      };
     }
   }, [isActive, fadeDuration]);
 
@@ -100,13 +110,17 @@ interface ProgressTimerProps {
 export function ProgressTimer({ duration, isActive, isPaused = false }: ProgressTimerProps) {
   const [progress, setProgress] = useState(0);
   const elapsedRef = useRef(0);
-  const lastTickRef = useRef(Date.now());
+  const lastTickRef = useRef(0);
 
   useEffect(() => {
     if (!isActive) {
-      setProgress(0);
+      const resetTimer = window.setTimeout(() => {
+        setProgress(0);
+      }, 0);
       elapsedRef.current = 0;
-      return;
+      return () => {
+        window.clearTimeout(resetTimer);
+      };
     }
 
     lastTickRef.current = Date.now();
