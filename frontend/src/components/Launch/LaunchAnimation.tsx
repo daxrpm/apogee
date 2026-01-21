@@ -1,6 +1,7 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useState, isValidElement } from 'react';
+import type { ReactNode } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Group } from 'three';
+import { Euler, Group, Vector3 } from 'three';
 import { useSimulationStore } from '../../stores/simulationStore';
 import {
   interpolatePosition,
@@ -8,8 +9,10 @@ import {
   getTrajectoryDuration,
   interpolateValue,
   R_EARTH,
+  SCENE_SCALE,
 } from '../../utils/coordinateTransform';
 import { PropulsionFX } from './PropulsionFX';
+import { Falcon9Rocket, type Falcon9RocketRef } from '../BeachScene/Falcon9Rocket';
 
 /**
  * LaunchAnimation Component
@@ -44,7 +47,7 @@ import { PropulsionFX } from './PropulsionFX';
  */
 
 interface LaunchAnimationProps {
-  children: React.ReactNode;
+  children: ReactNode;
   timeScale?: number;
 }
 
@@ -54,6 +57,16 @@ export function LaunchAnimation({
 }: LaunchAnimationProps) {
   const groupRef = useRef<Group>(null);
   const lastTimeRef = useRef(0);
+  const stage1GroupRef = useRef<Group>(null);
+  const stage2RocketRef = useRef<Falcon9RocketRef>(null);
+  const stage1StateRef = useRef<{
+    t0: number;
+    pos0: Vector3;
+    vel0: Vector3;
+    rot0: Euler;
+  } | null>(null);
+
+  const [stage2EngineOffsetY, setStage2EngineOffsetY] = useState(-2);
   
   const {
     launchData,
@@ -71,6 +84,13 @@ export function LaunchAnimation({
 
   // Extract trajectory data
   const trajectory = launchData?.trajectory;
+
+  const rocketScale = useMemo(() => {
+    if (isValidElement<{ scale?: number }>(children) && typeof children.props.scale === 'number') {
+      return children.props.scale;
+    }
+    return 1;
+  }, [children]);
   
   // Memoize trajectory arrays and stage separation detection
   const trajectoryData = useMemo(() => {
@@ -135,6 +155,65 @@ export function LaunchAnimation({
       setCurrentStage(2);
     }
 
+    if (newTime < trajectoryData.stageSepTime) {
+      stage1StateRef.current = null;
+    }
+
+    if (trajectory && newTime >= trajectoryData.stageSepTime) {
+      if (!stage1StateRef.current) {
+        const [sx, sy, sz] = interpolatePosition(
+          trajectoryData.times,
+          trajectoryData.posX,
+          trajectoryData.posY,
+          trajectoryData.stageSepTime
+        );
+
+        const [rx, ry, rz] = interpolateRotation(
+          trajectoryData.times,
+          trajectoryData.gammas,
+          trajectoryData.stageSepTime
+        );
+
+        const vMps = interpolateValue(trajectoryData.times, trajectoryData.velocities, trajectoryData.stageSepTime);
+        const gamma = interpolateValue(trajectoryData.times, trajectoryData.gammas, trajectoryData.stageSepTime);
+        const vScene = vMps * SCENE_SCALE;
+        const vx = vScene * Math.cos(gamma);
+        const vy = vScene * Math.sin(gamma);
+
+        const sepOffsetLocal = new Vector3(0, -1.2, 0);
+        const sepOffset = sepOffsetLocal.applyEuler(new Euler(rx, ry, rz));
+
+        stage1StateRef.current = {
+          t0: trajectoryData.stageSepTime,
+          pos0: new Vector3(sx, sy, sz).add(sepOffset),
+          vel0: new Vector3(vx, vy - 0.6, 0),
+          rot0: new Euler(rx, ry, rz),
+        };
+      }
+
+      if (stage1GroupRef.current && stage1StateRef.current) {
+        const dt = Math.max(0, newTime - stage1StateRef.current.t0);
+        const gScene = 9.81 * SCENE_SCALE;
+        const pos = stage1StateRef.current.pos0
+          .clone()
+          .add(stage1StateRef.current.vel0.clone().multiplyScalar(dt))
+          .add(new Vector3(0, -0.5 * gScene * dt * dt, 0));
+
+        stage1GroupRef.current.position.copy(pos);
+        stage1GroupRef.current.rotation.set(
+          stage1StateRef.current.rot0.x,
+          stage1StateRef.current.rot0.y,
+          stage1StateRef.current.rot0.z + dt * 0.35
+        );
+      }
+
+      const bounds = stage2RocketRef.current?.getModelBounds();
+      if (bounds) {
+        const desired = bounds.minY * rocketScale;
+        setStage2EngineOffsetY((prev) => (Math.abs(prev - desired) < 1e-3 ? prev : desired));
+      }
+    }
+
     // Update rocket position and rotation
     if (groupRef.current) {
       // Get interpolated position
@@ -183,24 +262,44 @@ export function LaunchAnimation({
     : 0;
   const thrustLevel = Math.min(1, 0.8 + (currentAltitude / 100000) * 0.2);
 
+  const isSeparated = animationTime >= trajectoryData.stageSepTime;
+
   return (
-    <group
-      ref={groupRef}
-      position={isPlaying ? undefined : initialPosition}
-      rotation={isPlaying ? undefined : initialRotation}
-    >
-      {children}
-      
-      {/* Propulsion Effects - positioned at engine bell */}
-      <PropulsionFX
-        active={enginesActive}
-        stage={currentStage}
-        thrust={thrustLevel}
-        position={[0, -2, 0]}  // Below rocket base
-        scale={2}
-        altitude={currentAltitude}
-      />
-    </group>
+    <>
+      <group
+        ref={groupRef}
+        position={isPlaying ? undefined : initialPosition}
+        rotation={isPlaying ? undefined : initialRotation}
+      >
+        {isSeparated ? (
+          <Falcon9Rocket
+            ref={stage2RocketRef}
+            modelPath="/models/falcon_9_-_spacex_second.glb"
+            scale={rocketScale}
+          />
+        ) : (
+          children
+        )}
+
+        <PropulsionFX
+          active={enginesActive}
+          stage={currentStage}
+          thrust={thrustLevel}
+          position={[0, isSeparated ? stage2EngineOffsetY : -2, 0]}
+          scale={2}
+          altitude={currentAltitude}
+        />
+      </group>
+
+      {isSeparated && (
+        <group ref={stage1GroupRef}>
+          <Falcon9Rocket
+            modelPath="/models/falcon_9_-_spacex_just_first_stage.glb"
+            scale={rocketScale}
+          />
+        </group>
+      )}
+    </>
   );
 }
 

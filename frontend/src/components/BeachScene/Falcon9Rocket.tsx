@@ -1,6 +1,7 @@
 import { useRef, forwardRef, useImperativeHandle, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { useGLTF } from '@react-three/drei';
-import { Group, Mesh, MeshStandardMaterial } from 'three';
+import { Box3, Group, Mesh, MeshStandardMaterial } from 'three';
 import type { GLTF } from 'three-stdlib';
 
 /**
@@ -34,12 +35,15 @@ import type { GLTF } from 'three-stdlib';
 
 export interface Falcon9RocketRef {
   getRocketGroup: () => Group | null;
+  getModelBounds: () => { minY: number; maxY: number } | null;
 }
 
 export interface Falcon9RocketProps {
   position?: [number, number, number];
   scale?: number;
   rotation?: [number, number, number];
+  modelPath?: string;
+  children?: ReactNode;
 }
 
 /**
@@ -51,20 +55,24 @@ export const Falcon9Rocket = forwardRef<Falcon9RocketRef, Falcon9RocketProps>(
       position = [0, 0, 0],
       scale = 1,
       rotation = [0, 0, 0],
+      modelPath = '/models/falcon_9_-_spacex.glb',
+      children,
     },
     ref
   ) {
     const rocketGroupRef = useRef<Group>(null);
+    const modelGroupRef = useRef<Group>(null);
+    const modelBoundsRef = useRef<{ minY: number; maxY: number } | null>(null);
 
     // Load the Falcon 9 model
-    const { scene } = useGLTF('/models/falcon_9_-_spacex.glb') as GLTF & { scene: Group };
+    const { scene } = useGLTF(modelPath) as GLTF & { scene: Group };
 
     // Clone and setup the model
     useEffect(() => {
-      if (scene && rocketGroupRef.current) {
-        // Clear any existing children
-        while (rocketGroupRef.current.children.length > 0) {
-          rocketGroupRef.current.remove(rocketGroupRef.current.children[0]);
+      if (scene && modelGroupRef.current) {
+        // Clear only the cloned model nodes (do not touch React children)
+        while (modelGroupRef.current.children.length > 0) {
+          modelGroupRef.current.remove(modelGroupRef.current.children[0]);
         }
 
         // Clone the entire scene
@@ -84,13 +92,17 @@ export const Falcon9Rocket = forwardRef<Falcon9RocketRef, Falcon9RocketProps>(
           }
         });
 
-        rocketGroupRef.current.add(clonedScene);
+        const box = new Box3().setFromObject(clonedScene);
+        modelBoundsRef.current = { minY: box.min.y, maxY: box.max.y };
+
+        modelGroupRef.current.add(clonedScene);
       }
     }, [scene]);
 
     // Expose ref methods
     useImperativeHandle(ref, () => ({
       getRocketGroup: () => rocketGroupRef.current,
+      getModelBounds: () => modelBoundsRef.current,
     }));
 
     return (
@@ -99,12 +111,17 @@ export const Falcon9Rocket = forwardRef<Falcon9RocketRef, Falcon9RocketProps>(
         position={position}
         scale={scale}
         rotation={rotation}
-      />
+      >
+        <group ref={modelGroupRef} />
+        {children}
+      </group>
     );
   }
 );
 
 // Preload the model
 useGLTF.preload('/models/falcon_9_-_spacex.glb');
+useGLTF.preload('/models/falcon_9_-_spacex_just_first_stage.glb');
+useGLTF.preload('/models/falcon_9_-_spacex_second.glb');
 
 export default Falcon9Rocket;
