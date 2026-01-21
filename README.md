@@ -26,10 +26,13 @@ Apogee is a comprehensive space mission simulator designed to model the complete
    - Real-time sun vector support for interactive 3D visualization
    - CLI and REST API endpoints
 
-4. **3D Visualization** (🔄 Future - `frontend`)
-   - Real-time launch trajectory visualization
-   - Orbital path rendering
-   - Solar panel attitude animation
+4. **3D Visualization** (🚧 In Progress - `frontend`)
+   - Real-time launch trajectory visualization (✅ Implemented)
+   - Stage separation rendering (✅ Implemented)
+   - Multi-mode camera system with free OrbitControls (✅ Implemented)
+   - Propulsion and separation effects (✅ Implemented)
+   - Orbital path rendering (🔄 Future)
+   - Satellite attitude animation (🔄 Future)
 
 ### Design Philosophy
 
@@ -102,8 +105,8 @@ apogee/
 
 ### Dependency Flow
 
-```
-Frontend (Three.js) [Future]
+```text
+Frontend (Three.js / React Three Fiber) [Launch implemented]
     ↓
 apogee-api (FastAPI)
     ↓
@@ -113,6 +116,41 @@ apogee-physics (JAX/Diffrax)
 ```
 
 **Design principle**: Each layer consumes the layer below directly. No logic duplication.
+
+### Frontend (`frontend/`)
+
+The frontend is a React + React Three Fiber application that renders the launch scene and plays back the backend trajectory data.
+
+**Workflow (npm):**
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+**Key implemented features:**
+
+- Stage separation rendering (full rocket before sep, stage1 falling + stage2 continuing after sep)
+- Multi-mode camera system using OrbitControls (free rotate/zoom across modes)
+- Onboard camera aligned tip-to-tail with a slight side offset
+- Propulsion and separation effects sized by stage/thrust/altitude
+
+**Frontend structure (clean feature boundaries):**
+
+```text
+frontend/src/
+├── features/
+│   ├── beach/         # launch site scene + control panel
+│   ├── launch/        # trajectory animation + cameras + FX
+│   └── navigation/    # intro scenes + transitions
+├── shared/
+│   └── terrain/       # reusable terrain renderer
+├── services/          # API client
+├── stores/            # Zustand global store
+├── utils/             # coordinate transforms + interpolation helpers
+└── App.tsx
+```
 
 ## Mathematical Formulation
 
@@ -1113,12 +1151,13 @@ diameter = 3.7 m         # Vehicle diameter
 
 ### Phase 4: 3D Visualization (Frontend)
 
-- [ ] Three.js scene setup
-- [ ] Real-time launch trajectory rendering
+- [x] Three.js scene setup
+- [x] Real-time launch trajectory rendering
+- [x] Camera controls and viewpoints
+- [x] Stage separation rendering
 - [ ] Orbital path visualization
-- [ ] Solar panel attitude animation
+- [ ] Satellite attitude animation
 - [ ] Earth texture and lighting
-- [ ] Camera controls and viewpoints
 
 **Note:** Trajectory output is already frontend-ready:
 - JSON-serializable via `trajectory_to_dict`
