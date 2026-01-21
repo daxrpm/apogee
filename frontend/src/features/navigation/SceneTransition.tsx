@@ -62,6 +62,8 @@ export function SceneTransition({
       return;
     }
 
+    lastTickRef.current = Date.now();
+
     const interval = setInterval(() => {
       const now = Date.now();
       const delta = now - lastTickRef.current;
