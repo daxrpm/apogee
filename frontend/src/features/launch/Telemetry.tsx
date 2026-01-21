@@ -8,12 +8,76 @@
 
 import { useMemo } from 'react';
 import { useSimulationStore } from '../../stores/simulationStore';
-import { useTrajectoryTelemetry, useFlightEvents } from '../../hooks/useTrajectory';
+import { interpolateValue } from '../../utils/coordinateTransform';
 
 export function Telemetry() {
-  const { currentScene, isPlaying, currentStage, enginesActive } = useSimulationStore();
-  const telemetry = useTrajectoryTelemetry();
-  const events = useFlightEvents();
+  const { currentScene, isPlaying, currentStage, enginesActive, launchData, animationTime } = useSimulationStore();
+  const trajectory = launchData?.trajectory;
+
+  const telemetry = useMemo(() => {
+    if (!trajectory) {
+      return {
+        time: 0,
+        altitude: 0,
+        velocity: 0,
+        gamma: Math.PI / 2,
+        mach: 0,
+        mass: 0,
+        dynamicPressure: 0,
+      };
+    }
+
+    const times = trajectory.t_s;
+
+    return {
+      time: animationTime,
+      altitude: interpolateValue(times, trajectory.h_m, animationTime),
+      velocity: interpolateValue(times, trajectory.v_mps, animationTime),
+      gamma: interpolateValue(times, trajectory.gamma_rad, animationTime),
+      mach: trajectory.mach ? interpolateValue(times, trajectory.mach, animationTime) : 0,
+      mass: trajectory.m_kg ? interpolateValue(times, trajectory.m_kg, animationTime) : 0,
+      dynamicPressure: trajectory.q_pa ? interpolateValue(times, trajectory.q_pa, animationTime) : 0,
+    };
+  }, [trajectory, animationTime]);
+
+  const events = useMemo(() => {
+    if (!trajectory) {
+      return {
+        maxQTime: 0,
+        stageSepTime: 0,
+      };
+    }
+
+    // Find MaxQ (maximum dynamic pressure)
+    let maxQTime = 0;
+    let maxQ = 0;
+    if (trajectory.q_pa) {
+      for (let i = 0; i < trajectory.q_pa.length; i++) {
+        if (trajectory.q_pa[i] > maxQ) {
+          maxQ = trajectory.q_pa[i];
+          maxQTime = trajectory.t_s[i];
+        }
+      }
+    }
+
+    // Stage separation detection (mass discontinuity)
+    let stageSepTime = 144;
+    if (trajectory.m_kg) {
+      for (let i = 1; i < trajectory.m_kg.length; i++) {
+        const massDrop = trajectory.m_kg[i - 1] - trajectory.m_kg[i];
+        const dt = trajectory.t_s[i] - trajectory.t_s[i - 1];
+        if (massDrop > 10000 && dt < 2) {
+          stageSepTime = trajectory.t_s[i];
+          break;
+        }
+      }
+    }
+
+    return {
+      maxQTime,
+      stageSepTime,
+    };
+  }, [trajectory]);
 
   const shouldShow = currentScene === 'launch' && isPlaying && telemetry;
 
