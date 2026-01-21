@@ -48,7 +48,7 @@ export function ControlPanel() {
               onChange={(e) => setHTargetKm(Number(e.target.value))}
               min={160}
               max={400}
-              step={10}
+              step={1}
               style={styles.input}
               disabled={isLoading}
             />
