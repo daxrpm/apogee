@@ -462,4 +462,130 @@ export function SmokeTrail({ active, rocketPosition }: SmokeTrailProps) {
   );
 }
 
+// ============ STAGE SEPARATION EFFECT ============
+
+interface StageSeparationFXProps {
+  /** Whether separation is active */
+  active: boolean;
+  /** Time since separation started (seconds) */
+  elapsedTime: number;
+  /** Position offset */
+  position?: [number, number, number];
+  /** Scale of the effect */
+  scale?: number;
+}
+
+const SEPARATION_PARTICLES = 200;
+
+/**
+ * Stage Separation Effect
+ * 
+ * Creates a realistic cold gas / pneumatic pusher effect:
+ * - Brief burst of white/gray particles expanding outward in a ring
+ * - Particles fade quickly over ~0.5 seconds
+ * - Simulates the pneumatic pushers that separate the stages
+ */
+export function StageSeparationFX({
+  active,
+  elapsedTime,
+  position = [0, 0, 0],
+  scale = 1,
+}: StageSeparationFXProps) {
+  const pointsRef = useRef<THREE.Points>(null);
+
+  // Generate initial particle data - ring around separation plane
+  const [positions, velocities] = useMemo(() => {
+    const pos = new Float32Array(SEPARATION_PARTICLES * 3);
+    const vel = new Float32Array(SEPARATION_PARTICLES * 3);
+
+    for (let i = 0; i < SEPARATION_PARTICLES; i++) {
+      const i3 = i * 3;
+      
+      // Start in a ring around the interstage
+      const angle = (i / SEPARATION_PARTICLES) * Math.PI * 2;
+      const radius = 0.8 + Math.random() * 0.3;
+      
+      pos[i3] = Math.cos(angle) * radius;
+      pos[i3 + 1] = (Math.random() - 0.5) * 0.3; // Thin band
+      pos[i3 + 2] = Math.sin(angle) * radius;
+      
+      // Velocity - outward from center with some randomness
+      const outSpeed = 2 + Math.random() * 2;
+      vel[i3] = Math.cos(angle) * outSpeed + (Math.random() - 0.5) * 0.5;
+      vel[i3 + 1] = (Math.random() - 0.5) * 1.5; // Some vertical spread
+      vel[i3 + 2] = Math.sin(angle) * outSpeed + (Math.random() - 0.5) * 0.5;
+    }
+
+    return [pos, vel];
+  }, []);
+
+  // Animate particles
+  useFrame(() => {
+    if (!pointsRef.current || !active) return;
+
+    const positionAttr = pointsRef.current.geometry.attributes.position;
+    const posArray = positionAttr.array as Float32Array;
+
+    for (let i = 0; i < SEPARATION_PARTICLES; i++) {
+      const i3 = i * 3;
+      
+      // Move particles outward with time
+      // Use a burst pattern - fast at first, then slowing
+      
+      posArray[i3] = positions[i3] + velocities[i3] * elapsedTime * 0.8;
+      posArray[i3 + 1] = positions[i3 + 1] + velocities[i3 + 1] * elapsedTime * 0.5;
+      posArray[i3 + 2] = positions[i3 + 2] + velocities[i3 + 2] * elapsedTime * 0.8;
+    }
+
+    positionAttr.needsUpdate = true;
+  });
+
+  // Only show for first 0.8 seconds of separation
+  if (!active || elapsedTime > 0.8) return null;
+
+  // Fade opacity as effect progresses
+  const opacity = Math.max(0, 0.7 - elapsedTime * 0.8);
+
+  return (
+    <group position={position} scale={scale}>
+      {/* Cold gas particles */}
+      <Points ref={pointsRef} positions={positions} stride={3} frustumCulled={false}>
+        <PointMaterial
+          transparent
+          color="#ffffff"
+          size={0.15}
+          sizeAttenuation
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          opacity={opacity}
+        />
+      </Points>
+
+      {/* Flash at moment of separation */}
+      {elapsedTime < 0.15 && (
+        <mesh>
+          <ringGeometry args={[0.6, 1.2, 32]} />
+          <meshBasicMaterial
+            color="#ffffff"
+            transparent
+            opacity={0.6 - elapsedTime * 4}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+
+      {/* Point light for the flash */}
+      {elapsedTime < 0.2 && (
+        <pointLight
+          color="#aaccff"
+          intensity={Math.max(0, 5 - elapsedTime * 25)}
+          distance={30}
+          decay={2}
+        />
+      )}
+    </group>
+  );
+}
+
 export default PropulsionFX;
+

@@ -5,7 +5,7 @@ import { Vector3 } from 'three';
 
 // Components
 import { OceanWater, BeachSand, RealisticMountain } from './Water';
-import { DaytimeSky, DaytimeLight, DaytimeClouds } from './Sky';
+import { DaytimeSky, DaytimeLight, DaytimeClouds, AscentSky, AscentLight, AscentClouds, SpaceStars } from './Sky';
 import { LaunchPad } from './LaunchPad';
 import { Falcon9Rocket, type Falcon9RocketRef } from './Falcon9Rocket';
 import { PalmForest, Seagulls } from './Vegetation';
@@ -54,7 +54,7 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
   const showCameraSelector = currentScene === 'launch';
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#87ceeb' }}>
+    <div style={{ width: '100vw', height: '100vh', background: isLaunching ? '#000000' : '#87ceeb' }}>
       <Canvas
         shadows
         camera={{
@@ -71,15 +71,32 @@ export function BeachScene({ showStats = false, showModels = true }: BeachSceneP
       >
         {showStats && <Stats />}
 
-        {/* Daytime Blue Sky */}
-        <DaytimeSky sunPosition={sunDirection} />
-        <DaytimeClouds count={10} />
+        {/* Sky */}
+        {isLaunching ? (
+          <>
+            <AscentSky sunPosition={sunDirection} />
+            <AscentClouds count={10} />
+            <SpaceStars />
+          </>
+        ) : (
+          <>
+            <DaytimeSky sunPosition={sunDirection} />
+            <DaytimeClouds count={10} />
+          </>
+        )}
 
         {/* Lighting */}
-        <DaytimeLight 
-          position={[sunDirection.x, sunDirection.y, sunDirection.z]} 
-          intensity={2.0}
-        />
+        {isLaunching ? (
+          <AscentLight
+            position={[sunDirection.x, sunDirection.y, sunDirection.z]}
+            intensity={2.0}
+          />
+        ) : (
+          <DaytimeLight
+            position={[sunDirection.x, sunDirection.y, sunDirection.z]}
+            intensity={2.0}
+          />
+        )}
 
         {/* Camera Controls */}
         {isLaunching ? (
