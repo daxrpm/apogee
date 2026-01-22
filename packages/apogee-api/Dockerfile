@@ -71,4 +71,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Run uvicorn with production settings
 # Use 0.0.0.0 to bind to all interfaces (required for Docker)
-CMD ["uvicorn", "apogee_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "apogee_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
