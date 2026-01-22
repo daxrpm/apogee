@@ -1,0 +1,196 @@
+# ============================================================================
+# Apogee Documentation - MkDocs Configuration
+# ============================================================================
+# Two-stage rocket ascent simulator with shooting-method optimization
+# for circular LEO insertion.
+#
+# Theme: mkdocs-shadcn (https://asiffer.github.io/mkdocs-shadcn/)
+#
+# Build: uv run mkdocs build
+# Serve: uv run mkdocs serve
+# ============================================================================
+
+site_name: "Apogee"
+site_description: "Two-stage rocket ascent simulator with shooting-method optimization for circular LEO insertion"
+site_author: "Dax Navarrete"
+site_url: "https://daxrpm.github.io/apogee/"
+
+repo_url: "https://github.com/daxrpm/apogee"
+repo_name: "apogee"
+
+docs_dir: content
+
+# ============================================================================
+# Theme Configuration (shadcn)
+# https://asiffer.github.io/mkdocs-shadcn/
+# ============================================================================
+theme:
+  name: shadcn
+  show_title: true
+  show_stargazers: true
+  show_datetime: true
+  topbar_sections: true
+  
+  # Syntax highlighting
+  pygments_style:
+    light: shadcn-light
+    dark: github-dark
+  
+  # Icon for the site
+  icon: heroicons:rocket-launch
+  
+  # KaTeX options for mathematical typesetting
+  # All macros match the LaTeX source (nm_final_project.tex)
+  katex_options:
+    displayMode: false
+    throwOnError: false
+    macros:
+      # Vector notation
+      "\\bm": "\\boldsymbol"
+      "\\vec": "\\mathbf"
+      
+      # Derivatives
+      "\\dd": "\\mathrm{d}"
+      "\\dv": "\\frac{\\dd #1}{\\dd #2}"
+      "\\pdv": "\\frac{\\partial #1}{\\partial #2}"
+      
+      # Common sets
+      "\\RR": "\\mathbb{R}"
+      "\\NN": "\\mathbb{N}"
+      
+      # Physics symbols (matching LaTeX source)
+      "\\ve": "\\varepsilon"
+      "\\gam": "\\gamma"
+      "\\lam": "\\lambda"
+      "\\alp": "\\alpha"
+      
+      # Norms and absolute values
+      "\\norm": "\\left\\|#1\\right\\|"
+      "\\abs": "\\left|#1\\right|"
+      
+      # Boxed results for key equations
+      "\\result": "\\boxed{#1}"
+
+# ============================================================================
+# Markdown Extensions
+# ============================================================================
+markdown_extensions:
+  # Math rendering with KaTeX (built into shadcn)
+  - pymdownx.arithmatex:
+      generic: true
+  
+  # Code highlighting
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  
+  # Admonitions (callout boxes)
+  - admonition
+  - pymdownx.details
+  - pymdownx.blocks.admonition
+  
+  # Tabbed content
+  - pymdownx.tabbed:
+      alternate_style: true
+  
+  # Additional extensions
+  - footnotes
+  - attr_list
+  - md_in_html
+  - tables
+  - def_list
+  - toc:
+      permalink: true
+      toc_depth: 3
+  
+  # Task lists
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+# ============================================================================
+# Plugins
+# ============================================================================
+plugins:
+  - search
+
+# ============================================================================
+# Navigation Structure
+# ============================================================================
+nav:
+  - Home: index.md
+  
+  - Getting Started:
+    - getting-started/index.md
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Architecture: getting-started/architecture.md
+  
+  - Theory:
+    - theory/index.md
+    - State Vector: theory/state-vector.md
+    - Equations of Motion: theory/equations-of-motion.md
+    - Atmosphere Model: theory/atmosphere.md
+    - Orbital Mechanics: theory/orbital-mechanics.md
+    - Flight Phases: theory/flight-phases.md
+  
+  - Numerical Methods:
+    - numerical-methods/index.md
+    - ODE Integration:
+      - numerical-methods/ode-integration/index.md
+      - Runge-Kutta Methods: numerical-methods/ode-integration/runge-kutta.md
+      - Adaptive Stepping: numerical-methods/ode-integration/adaptive-stepping.md
+    - Optimization:
+      - numerical-methods/optimization/index.md
+      - Shooting Method: numerical-methods/optimization/shooting-method.md
+      - Levenberg-Marquardt: numerical-methods/optimization/levenberg-marquardt.md
+      - Broyden Update: numerical-methods/optimization/broyden-update.md
+    - Numerical Stability:
+      - numerical-methods/stability/index.md
+      - Singularity Guards: numerical-methods/stability/singularity-guards.md
+  
+  - Packages:
+    - packages/index.md
+    - apogee-physics:
+      - packages/apogee-physics/index.md
+      - dynamics: packages/apogee-physics/dynamics.md
+      - atmosphere: packages/apogee-physics/atmosphere.md
+      - simulate: packages/apogee-physics/simulate.md
+      - shooting: packages/apogee-physics/shooting.md
+      - orbit: packages/apogee-physics/orbit.md
+    - apogee-launch:
+      - packages/apogee-launch/index.md
+      - simulator: packages/apogee-launch/simulator.md
+      - falcon9: packages/apogee-launch/falcon9.md
+    - apogee-orbit:
+      - packages/apogee-orbit/index.md
+      - core: packages/apogee-orbit/core.md
+      - attitude: packages/apogee-orbit/attitude.md
+    - apogee-api:
+      - packages/apogee-api/index.md
+      - endpoints: packages/apogee-api/endpoints.md
+  
+  - Frontend:
+    - frontend/index.md
+    - Architecture: frontend/architecture.md
+    - Components: frontend/components.md
+  
+  - Reference:
+    - reference/index.md
+    - Physical Constants: reference/constants.md
+    - Falcon 9 Specifications: reference/falcon9-specs.md
+    - Bibliography: reference/bibliography.md
+
+# ============================================================================
+# Extra Configuration
+# ============================================================================
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/daxrpm/apogee
