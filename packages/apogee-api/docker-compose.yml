@@ -4,10 +4,10 @@
 services:
   apogee-api:
     build:
-      context: ../..
+      context: .
       dockerfile: packages/apogee-api/Dockerfile
     ports:
-      - "8000:8000"
+      - 8000
     environment:
       # Environment variables (Coolify can override these)
       - PORT=8000
