@@ -13,12 +13,16 @@
 site_name: "Apogee"
 site_description: "Two-stage rocket ascent simulator with shooting-method optimization for circular LEO insertion"
 site_author: "Dax Navarrete"
-site_url: "https://daxrpm.github.io/apogee/"
+
+site_url: "https://apogee-docs.daxrpm.dev"
 
 repo_url: "https://github.com/daxrpm/apogee"
 repo_name: "apogee"
 
 docs_dir: content
+
+# Use relative URLs for assets - essential for deployment flexibility
+use_directory_urls: true
 
 # ============================================================================
 # Theme Configuration (shadcn)
