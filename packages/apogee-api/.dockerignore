@@ -1,0 +1,67 @@
+# Docker ignore file for APOGEE API
+# Optimizes build context and reduces image size
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+*.eggs
+dist
+build
+*.egg
+
+# Virtual environments
+.venv
+venv
+ENV
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+.windsurf
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.nox
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Frontend (not needed for API)
+frontend/
+
+# Development files
+*.log
+*.local
+.env.local
+.env.development
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints
+
+# Plots and outputs
+plots/
+*.png
+*.jpg
+*.gif
+*.svg
+
+# OS files
+.DS_Store
+Thumbs.db

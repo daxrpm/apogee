@@ -1,0 +1,32 @@
+# Docker Compose for local testing
+# Run: docker compose up --build
+
+services:
+  apogee-api:
+    build:
+      context: ../..
+      dockerfile: packages/apogee-api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Environment variables (Coolify can override these)
+      - PORT=8000
+      - LOG_LEVEL=info
+      - JAX_PLATFORM_NAME=cpu
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+    # Resource limits (adjust based on your workload)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
