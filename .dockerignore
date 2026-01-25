@@ -1,0 +1,65 @@
+# Docker ignore file for APOGEE monorepo
+# Used when building from project root
+
+# Git
+.git
+.gitignore
+
+# Python cache
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+**/*.so
+**/.Python
+**/*.egg-info
+**/*.eggs
+**/dist
+**/build
+**/*.egg
+
+# Virtual environments
+.venv
+**/venv
+**/ENV
+**/env
+
+# IDE
+.vscode
+.idea
+**/*.swp
+**/*.swo
+.windsurf
+
+# Testing
+**/.pytest_cache
+**/.coverage
+**/htmlcov
+**/.tox
+**/.nox
+
+# Documentation (keep READMEs for context)
+docs/
+
+# Frontend (not needed for API build)
+frontend/
+
+# Development files
+**/*.log
+**/*.local
+**/.env.local
+**/.env.development
+
+# Jupyter
+**/*.ipynb
+**/.ipynb_checkpoints
+
+# Plots and outputs
+plots/
+**/*.png
+**/*.jpg
+**/*.gif
+**/*.svg
+
+# OS files
+**/.DS_Store
+**/Thumbs.db
