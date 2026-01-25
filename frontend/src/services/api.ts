@@ -110,6 +110,15 @@ export interface TrajectoryData {
 
     /** Drag force in N (optional) */
     drag_n?: number[];
+
+    orbit?: {
+        specific_energy?: number;
+        specific_angular_momentum?: number;
+        semi_major_axis: number;
+        eccentricity?: number;
+        r_apoapsis?: number;
+        r_periapsis?: number;
+    };
 }
 
 /**
@@ -166,7 +175,7 @@ export async function simulateLaunch(params: LaunchParams): Promise<LaunchRespon
 
     if (!response.ok) {
         const errorText = await response.text();
-        
+
         // Try to parse JSON error from backend
         try {
             const errorJson = JSON.parse(errorText);
@@ -174,7 +183,7 @@ export async function simulateLaunch(params: LaunchParams): Promise<LaunchRespon
                 // Parse shooting convergence error format
                 const detail = errorJson.detail;
                 const match = detail.match(/Shooting did not converge \(evals=(\d+)\/(\d+), u=\[([^\]]+)\], \|\|F\|\|=([\d.]+), F=\[([^\]]+)\]\)/);
-                
+
                 if (match) {
                     const error = new Error('CONVERGENCE_ERROR') as Error & { convergenceData: object };
                     error.convergenceData = {
@@ -185,7 +194,7 @@ export async function simulateLaunch(params: LaunchParams): Promise<LaunchRespon
                     };
                     throw error;
                 }
-                
+
                 throw new Error(detail);
             }
             throw new Error(errorText);
@@ -195,6 +204,111 @@ export async function simulateLaunch(params: LaunchParams): Promise<LaunchRespon
             }
             throw new Error(`Error ${response.status}: ${errorText}`);
         }
+    }
+
+    return response.json();
+}
+
+// ============ ORBIT ENDPOINTS ============
+
+export interface OrbitTrajectoryRequest {
+    r_m: number;
+    nu_initial_rad: number;
+    sun_x: number;
+    sun_y: number;
+    sun_z: number;
+    t_duration_s?: number;
+    n_points?: number;
+}
+
+export interface OrbitTrajectoryResponse {
+    orbit_params: {
+        semi_major_axis_m: number;
+        period_s: number;
+        mean_motion_rad_s: number;
+        nu_initial_rad: number;
+        t_duration_s: number;
+    };
+    trajectory: {
+        x_m: number[];
+        y_m: number[];
+        z_m: number[];
+    };
+    yaw_steering: {
+        t_s: number[];
+        yaw_rad: number[];
+        yaw_deg: number[];
+        beta_rad: number[];
+        beta_deg: number[];
+        panel_angle_rad: number[];
+        panel_angle_deg: number[];
+        nu_rad: number[];
+    };
+}
+
+export interface YawRequest {
+    r_m: number;
+    nu_initial_rad: number;
+    sun_x: number;
+    sun_y: number;
+    sun_z: number;
+    t_s: number;
+}
+
+export interface YawResponse {
+    yaw_rad: number;
+    yaw_deg: number;
+    beta_rad: number;
+    beta_deg: number;
+    panel_angle_rad: number;
+    panel_angle_deg: number;
+    sun_body: number[];
+    satellite_position: number[];
+}
+
+export async function getOrbitTrajectory(
+    params: OrbitTrajectoryRequest
+): Promise<OrbitTrajectoryResponse> {
+    const response = await fetch(`${API_BASE_URL}/orbit/trajectory`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(params),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.detail) throw new Error(errorJson.detail);
+        } catch {
+            // ignore parse
+        }
+        throw new Error(`Error ${response.status}: ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export async function getYawInstant(params: YawRequest): Promise<YawResponse> {
+    const response = await fetch(`${API_BASE_URL}/orbit/yaw`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(params),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.detail) throw new Error(errorJson.detail);
+        } catch {
+            // ignore parse
+        }
+        throw new Error(`Error ${response.status}: ${errorText}`);
     }
 
     return response.json();
