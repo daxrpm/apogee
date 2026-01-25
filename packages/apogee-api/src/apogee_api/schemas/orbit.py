@@ -54,6 +54,9 @@ class YawRequest(BaseModel):
 class YawResponse(BaseModel):
     """Response with instant yaw calculation."""
     
+    t: float
+    """Time since epoch [s]"""
+    
     yaw_rad: float
     """Yaw angle [rad]"""
     
@@ -65,9 +68,16 @@ class YawResponse(BaseModel):
     
     beta_deg: float
     """Beta angle [deg]"""
+
+    panel_angle_rad: float
+    """Panel rotation angle [rad]"""
+
+    panel_angle_deg: float
+    """Panel rotation angle [deg]"""
     
     sun_body: list[float]
     """Sun vector in body frame [x, y, z] for debugging"""
     
     satellite_position: list[float]
     """Satellite position in ECI [x, y, z] [m]"""
+
