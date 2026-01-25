@@ -9,6 +9,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { BeachScene } from './features/beach';
+import { OrbitScene } from './features/orbit';
 import { 
   SceneTransition,
   ProgressTimer,
@@ -16,6 +17,7 @@ import {
 } from './features/navigation';
 import { useSimulationStore } from './stores/simulationStore';
 import { SCENE_INFO, type SceneType } from './types';
+import YawSteeringLab from './lab/YawSteeringLab';
 
 // ============ CONSTANTS ============
 
@@ -61,6 +63,13 @@ const styles = {
 // ============ COMPONENT ============
 
 function App() {
+  // Check if we're in lab mode (URL path = /lab)
+  const isLabMode = window.location.pathname === '/lab';
+  
+  if (isLabMode) {
+    return <YawSteeringLab />;
+  }
+
   const { currentScene, nextScene, skipToBeach, hasSeenIntro } = useSimulationStore();
   const [interactionScene, setInteractionScene] = useState<SceneType | null>(null);
 
@@ -134,7 +143,11 @@ function App() {
         isActive={MAIN_SCENES.includes(currentScene)}
         autoAdvanceMs={0}
       >
-        <BeachScene showStats={false} showModels={true} />
+        {currentScene === 'orbit' ? (
+          <OrbitScene />
+        ) : (
+          <BeachScene showStats={false} showModels={true} />
+        )}
       </SceneTransition>
     </div>
   );

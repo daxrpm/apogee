@@ -8,7 +8,13 @@
  */
 
 import { create } from 'zustand';
-import { simulateLaunch, type LaunchResponse, type LaunchParams } from '../services/api';
+import {
+  simulateLaunch,
+  getOrbitTrajectory,
+  type LaunchResponse,
+  type LaunchParams,
+  type OrbitTrajectoryResponse,
+} from '../services/api';
 import { SCENE_ORDER, type SceneType, type ConvergenceError } from '../types';
 
 // ============ STATE INTERFACE ============
@@ -41,6 +47,13 @@ interface SimulationState {
 
   // Orbit phase
   sunVector: [number, number, number];
+
+  skipLaunch3D: boolean;
+
+  orbitParams: { r_m: number; nu_initial_rad: number } | null;
+  orbitData: OrbitTrajectoryResponse | null;
+  orbitLoading: boolean;
+  orbitError: string | null;
 }
 
 // ============ ACTIONS INTERFACE ============
@@ -71,6 +84,11 @@ interface SimulationActions {
 
   // Orbit
   setSunVector: (vec: [number, number, number]) => void;
+  fetchOrbitTrajectory: () => Promise<void>;
+  clearOrbitError: () => void;
+
+  setSkipLaunch3D: (value: boolean) => void;
+  skipToOrbit: () => void;
 
   // Reset
   replay: () => void;
@@ -99,6 +117,11 @@ const initialState: SimulationState = {
   enginesActive: false,
   currentStage: 1,
   sunVector: [1, 0, 0],
+  skipLaunch3D: false,
+  orbitParams: null,
+  orbitData: null,
+  orbitLoading: false,
+  orbitError: null,
 };
 
 // ============ STORE ============
@@ -154,15 +177,24 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
       const result = await simulateLaunch(params);
 
+      const r_m = result.trajectory?.orbit?.semi_major_axis;
+      const nu_initial_rad = result.trajectory?.lambda_rad?.[result.trajectory.lambda_rad.length - 1];
+
       set({
         launchData: result,
         isLoading: false,
-        currentScene: 'launch',
-        isPlaying: true,
+        currentScene: state.skipLaunch3D ? 'orbit' : 'launch',
+        isPlaying: state.skipLaunch3D ? false : true,
         animationTime: 0,
-        enginesActive: true,
+        enginesActive: state.skipLaunch3D ? false : true,
         currentStage: 1,
+        orbitParams: typeof r_m === 'number' && typeof nu_initial_rad === 'number' ? { r_m, nu_initial_rad } : null,
+        orbitData: null,
+        orbitLoading: false,
+        orbitError: null,
       });
+
+      void get().fetchOrbitTrajectory();
     } catch (error) {
       const err = error as Error & { convergenceData?: ConvergenceError };
       if (err.message === 'CONVERGENCE_ERROR' && err.convergenceData) {
@@ -190,7 +222,53 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   setCurrentStage: (stage) => set({ currentStage: stage }),
 
   // Orbit
-  setSunVector: (vec) => set({ sunVector: vec }),
+  setSunVector: (vec) => {
+    const [x, y, z] = vec;
+    const n = Math.sqrt(x * x + y * y + z * z);
+    if (n <= 0) return;
+    set({ sunVector: [x / n, y / n, z / n] });
+  },
+  fetchOrbitTrajectory: async () => {
+    const { orbitParams, sunVector } = get();
+    if (!orbitParams) return;
+
+    set({ orbitLoading: true, orbitError: null });
+    try {
+      const [sx, sy, sz] = sunVector;
+      const n = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1;
+      const sun_x = sx / n;
+      const sun_y = sy / n;
+      const sun_z = sz / n;
+      const result = await getOrbitTrajectory({
+        r_m: orbitParams.r_m,
+        nu_initial_rad: orbitParams.nu_initial_rad,
+        sun_x,
+        sun_y,
+        sun_z,
+        n_points: 360,
+      });
+
+      set({ orbitData: result, orbitLoading: false });
+    } catch (e) {
+      const err = e as Error;
+      set({ orbitError: err.message || 'Orbit trajectory failed', orbitLoading: false });
+    }
+  },
+  clearOrbitError: () => set({ orbitError: null }),
+
+  setSkipLaunch3D: (value) => set({ skipLaunch3D: value }),
+
+  skipToOrbit: () => {
+    const { launchData } = get();
+    if (!launchData?.trajectory) return;
+
+    set({
+      currentScene: 'orbit',
+      isPlaying: false,
+      enginesActive: false,
+      animationTime: launchData.trajectory.t_s[launchData.trajectory.t_s.length - 1],
+    });
+  },
 
   // Reset
   replay: () => set({
