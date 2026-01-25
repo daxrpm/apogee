@@ -11,7 +11,15 @@ import { useSimulationStore } from '../../stores/simulationStore';
 import { interpolateValue } from '../../utils/coordinateTransform';
 
 export function Telemetry() {
-  const { currentScene, isPlaying, currentStage, enginesActive, launchData, animationTime } = useSimulationStore();
+  const { 
+    currentScene, 
+    isPlaying, 
+    currentStage, 
+    enginesActive, 
+    launchData, 
+    animationTime,
+    skipToOrbit 
+  } = useSimulationStore();
   const trajectory = launchData?.trajectory;
 
   const telemetry = useMemo(() => {
@@ -169,6 +177,15 @@ export function Telemetry() {
           unit="kPa" 
         />
         <EngineStatus stage={currentStage} active={enginesActive} />
+        
+        {/* Skip Button */}
+        <button
+          onClick={skipToOrbit}
+          style={styles.skipButton}
+          title="Skip to Orbit"
+        >
+          SKIP ⏩
+        </button>
       </div>
     </div>
   );
@@ -443,6 +460,20 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'all 0.2s ease',
     gridColumn: '1 / -1',
     justifySelf: 'center',
+  },
+  
+  skipButton: {
+    background: 'rgba(255, 255, 255, 0.15)',
+    border: '1px solid rgba(255, 255, 255, 0.3)',
+    borderRadius: 4,
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 700,
+    padding: '6px 12px',
+    cursor: 'pointer',
+    fontFamily: "'Roboto Mono', monospace",
+    marginLeft: 15,
+    transition: 'all 0.2s',
   },
 };
 

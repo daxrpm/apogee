@@ -10,6 +10,7 @@ export function ControlPanel() {
     theta0Deg,
     tCoastS,
     tBurn2S,
+    skipLaunch3D,
     isLoading,
     error,
     errorData,
@@ -18,6 +19,7 @@ export function ControlPanel() {
     setTheta0Deg,
     setTCoastS,
     setTBurn2S,
+    setSkipLaunch3D,
     startSimulation,
     clearError,
   } = useSimulationStore();
@@ -131,6 +133,19 @@ export function ControlPanel() {
                   style={styles.input}
                   disabled={isLoading}
                 />
+              </div>
+
+              <div style={styles.checkboxRow}>
+                <label style={styles.checkboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={skipLaunch3D}
+                    onChange={(e) => setSkipLaunch3D(e.target.checked)}
+                    disabled={isLoading}
+                    style={styles.checkbox}
+                  />
+                  SKIP LAUNCH 3D
+                </label>
               </div>
             </div>
           )}
@@ -287,6 +302,27 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '12px',
     paddingLeft: '12px',
     borderLeft: '2px solid rgba(255, 255, 255, 0.1)',
+  },
+  checkboxRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    paddingTop: '4px',
+  },
+  checkboxLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    fontSize: '10px',
+    letterSpacing: '1px',
+    color: 'rgba(255, 255, 255, 0.7)',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  checkbox: {
+    width: 14,
+    height: 14,
+    accentColor: '#1a73e8',
   },
   errorContainer: {
     background: 'rgba(255, 100, 100, 0.15)',
