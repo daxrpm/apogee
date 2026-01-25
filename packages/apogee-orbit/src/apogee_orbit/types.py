@@ -36,3 +36,4 @@ class AttitudeSolution:
     yaw: float
     beta: float
     sun_body: Tuple[float, float, float]
+    panel_angle: float
