@@ -51,6 +51,7 @@ async def get_orbit_trajectory(request: OrbitTrajectoryRequest):
         x_arr, y_arr, z_arr = [], [], []
         yaw_rad_arr, yaw_deg_arr = [], []
         beta_rad_arr, beta_deg_arr = [], []
+        panel_angle_rad_arr, panel_angle_deg_arr = [], []
         nu_arr = []
         
         # Calculate for each point
@@ -68,6 +69,8 @@ async def get_orbit_trajectory(request: OrbitTrajectoryRequest):
             yaw_deg_arr.append(float(math.degrees(sol.yaw)))
             beta_rad_arr.append(float(sol.beta))
             beta_deg_arr.append(float(math.degrees(sol.beta)))
+            panel_angle_rad_arr.append(float(sol.panel_angle))
+            panel_angle_deg_arr.append(float(math.degrees(sol.panel_angle)))
         
         elapsed = time.time() - start_time
         logger.info(f"Trajectory computed in {elapsed*1000:.1f}ms - {request.n_points} points, period={period:.0f}s")
@@ -90,7 +93,11 @@ async def get_orbit_trajectory(request: OrbitTrajectoryRequest):
                 "yaw_rad": yaw_rad_arr,
                 "yaw_deg": yaw_deg_arr,
                 "beta_rad": beta_rad_arr,
+                "yaw_deg": yaw_deg_arr,
+                "beta_rad": beta_rad_arr,
                 "beta_deg": beta_deg_arr,
+                "panel_angle_rad": panel_angle_rad_arr,
+                "panel_angle_deg": panel_angle_deg_arr,
                 "nu_rad": nu_arr,
             },
         )
@@ -128,10 +135,13 @@ async def get_yaw_instant(request: YawRequest):
         logger.debug(f"Yaw calculated in {elapsed*1000:.2f}ms - yaw={math.degrees(sol.yaw):.1f}deg")
         
         return YawResponse(
+            t=float(request.t_s),
             yaw_rad=float(sol.yaw),
             yaw_deg=float(math.degrees(sol.yaw)),
             beta_rad=float(sol.beta),
             beta_deg=float(math.degrees(sol.beta)),
+            panel_angle_rad=float(sol.panel_angle),
+            panel_angle_deg=float(math.degrees(sol.panel_angle)),
             sun_body=[float(sol.sun_body[0]), float(sol.sun_body[1]), float(sol.sun_body[2])],
             satellite_position=[float(state.r_eci[0]), float(state.r_eci[1]), float(state.r_eci[2])],
         )
