@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSimulationStore } from '../../stores/simulationStore';
-import { interpolateValue, R_EARTH } from '../../utils/coordinateTransform';
+import { interpolateAngle, interpolateValue, R_EARTH } from '../../utils/coordinateTransform';
 import { OrbitGlobe, type OrbitPoint, type OrbitSatelliteData } from './OrbitGlobe';
 
 /**
@@ -60,6 +60,8 @@ export function OrbitScene() {
   } = useSimulationStore();
 
   const [tOrbitS, setTOrbitS] = useState(0);
+  const [manualNuEnabled, setManualNuEnabled] = useState(false);
+  const [manualNuDeg, setManualNuDeg] = useState(0);
 
   useEffect(() => {
     if (currentScene !== 'orbit') return;
@@ -106,52 +108,62 @@ export function OrbitScene() {
   }, [sunVector]);
 
   const satellite = useMemo<OrbitSatelliteData>(() => {
-    if (!orbitData) {
+    if (!orbitData || !orbitParams) {
       return {
         lat: 0,
         lng: 0,
         alt: 0,
         yawRad: 0,
         panelAngleRad: 0,
-        positionEciM: [R_EARTH, 0, 0],
-        velocityEciMps: [0, 0, 0],
+        nuRad: 0,
       };
     }
 
-    const { t_s } = orbitData.yaw_steering;
-    const { x_m, y_m, z_m } = orbitData.trajectory;
+    const { t_s, nu_rad } = orbitData.yaw_steering;
 
     const period = orbitData.orbit_params.period_s;
     const t = period > 0 ? ((tOrbitS % period) + period) % period : tOrbitS;
 
-    const x = interpolateValue(t_s, x_m, t);
-    const y = interpolateValue(t_s, y_m, t);
-    const z = interpolateValue(t_s, z_m, t);
+    let nuRad = 0;
+    let yawRad = 0;
+    let panelAngleRad = 0;
+    if (manualNuEnabled) {
+      const targetNu = (manualNuDeg * Math.PI) / 180;
+      let bestIdx = 0;
+      let bestErr = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < nu_rad.length; i++) {
+        const d = Math.atan2(Math.sin(nu_rad[i] - targetNu), Math.cos(nu_rad[i] - targetNu));
+        const err = Math.abs(d);
+        if (err < bestErr) {
+          bestErr = err;
+          bestIdx = i;
+        }
+      }
 
-    const dt = 1;
-    const t0 = Math.max(0, t - dt);
-    const t1 = Math.min(period, t + dt);
+      nuRad = nu_rad[bestIdx] ?? targetNu;
+      yawRad = orbitData.yaw_steering.yaw_rad[bestIdx] ?? 0;
+      panelAngleRad = orbitData.yaw_steering.panel_angle_rad
+        ? orbitData.yaw_steering.panel_angle_rad[bestIdx] ?? 0
+        : 0;
+    } else {
+      nuRad = interpolateValue(t_s, nu_rad, t);
+      yawRad = interpolateAngle(t_s, orbitData.yaw_steering.yaw_rad, t);
+      panelAngleRad = orbitData.yaw_steering.panel_angle_rad
+        ? interpolateAngle(t_s, orbitData.yaw_steering.panel_angle_rad, t)
+        : 0;
+    }
 
-    const x0 = interpolateValue(t_s, x_m, t0);
-    const y0 = interpolateValue(t_s, y_m, t0);
-    const z0 = interpolateValue(t_s, z_m, t0);
-
-    const x1 = interpolateValue(t_s, x_m, t1);
-    const y1 = interpolateValue(t_s, y_m, t1);
-    const z1 = interpolateValue(t_s, z_m, t1);
-
-    const denom = Math.max(1e-6, t1 - t0);
-    const vx = (x1 - x0) / denom;
-    const vy = (y1 - y0) / denom;
-    const vz = (z1 - z0) / denom;
-
-    const yawRad = interpolateValue(t_s, orbitData.yaw_steering.yaw_rad, t);
-    // Use explicit panel angle if available, otherwise 0
-    const panelAngleRad = orbitData.yaw_steering.panel_angle_rad 
-      ? interpolateValue(t_s, orbitData.yaw_steering.panel_angle_rad, t)
-      : 0;
-
+    // Calculate lat/lng/alt from nuRad for display purposes
+    const r = orbitParams.r_m;
+    const x = r * Math.cos(nuRad);
+    const y = r * Math.sin(nuRad);
+    const z = 0; // Equatorial orbit
     const { lat, lng, alt } = eciToLatLngAlt({ x, y, z });
+
+    yawRad = Math.atan2(
+      Math.sin(Math.PI - yawRad + Math.PI / 2),
+      Math.cos(Math.PI - yawRad + Math.PI / 2)
+    );
 
     return {
       lat,
@@ -159,10 +171,9 @@ export function OrbitScene() {
       alt,
       yawRad,
       panelAngleRad,
-      positionEciM: [x, y, z],
-      velocityEciMps: [vx, vy, vz],
+      nuRad,
     };
-  }, [orbitData, tOrbitS]);
+  }, [orbitData, orbitParams, tOrbitS, manualNuEnabled, manualNuDeg]);
 
   const handleGlobeClick = useCallback(
     (coords: { lat: number; lng: number }) => {
@@ -218,13 +229,168 @@ export function OrbitScene() {
       )}
 
       {orbitData && (
-        <OrbitGlobe
-          orbitPath={orbitPath}
-          satellite={satellite}
-          sun={sun}
-          sunVectorEci={sunVector}
-          onGlobeClick={handleGlobeClick}
-        />
+        <>
+          <OrbitGlobe
+            orbitPath={orbitPath}
+            satellite={satellite}
+            orbitRadius={orbitParams?.r_m || R_EARTH + 200000}
+            sun={sun}
+            sunVectorEci={sunVector}
+            onGlobeClick={handleGlobeClick}
+          />
+
+          <div
+            style={{
+              position: 'absolute',
+              top: 20,
+              right: 20,
+              zIndex: 1001,
+              padding: '10px 12px',
+              borderRadius: 8,
+              background: 'rgba(0,0,0,0.55)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: '#fff',
+              fontFamily: "'Roboto Mono', monospace",
+              fontSize: 11,
+              pointerEvents: 'auto',
+              width: 260,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ fontWeight: 700 }}>Manual ν</div>
+              <input
+                type="checkbox"
+                checked={manualNuEnabled}
+                onChange={(e) => setManualNuEnabled(e.target.checked)}
+              />
+            </div>
+
+            <div style={{ marginTop: 8, opacity: manualNuEnabled ? 1 : 0.5 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div>ν</div>
+                <div>{manualNuDeg.toFixed(0)}°</div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                step={1}
+                value={manualNuDeg}
+                onChange={(e) => setManualNuDeg(Number(e.target.value))}
+                disabled={!manualNuEnabled}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+
+          {/* Metrics Overlay */}
+          <div
+            style={{
+              position: 'absolute',
+              bottom: '40px',
+              right: '40px',
+              width: '320px',
+              background: 'linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(15, 15, 30, 0.95) 100%)',
+              color: '#fff',
+              padding: '20px',
+              borderRadius: '16px',
+              border: '1px solid rgba(0, 217, 255, 0.3)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+              fontFamily: "'Inter', sans-serif",
+              backdropFilter: 'blur(10px)',
+              pointerEvents: 'none',
+              zIndex: 1000,
+            }}
+          >
+            <h2 style={{ fontSize: '16px', marginBottom: '15px', color: '#00d9ff', borderBottom: '1px solid rgba(0,217,255,0.2)', paddingBottom: '8px' }}>
+              📡 Yaw Steering Metrics
+            </h2>
+
+            <div style={{ display: 'grid', gap: '10px' }}>
+              {/* ORBIT POSITION */}
+              {(() => {
+                // Use nuRad directly from satellite state
+                const nuDeg = ((satellite.nuRad * 180 / Math.PI) % 360 + 360) % 360;
+                
+                const alphaRad = Math.atan2(sunVector[1], sunVector[0]);
+                const alphaDeg = ((alphaRad * 180 / Math.PI) % 360 + 360) % 360;
+                
+                // η = ν - α - 180° (measured from Midnight)
+                let etaDeg = nuDeg - alphaDeg - 180;
+                etaDeg = ((etaDeg % 360) + 360) % 360;
+                
+                return (
+                  <div style={{ padding: '10px', background: 'rgba(255,140,0,0.15)', borderRadius: '8px', marginBottom: '5px' }}>
+                    <div style={{ fontSize: '10px', color: '#ff8c00', fontWeight: 'bold', textTransform: 'uppercase' }}>📍 Orbit Position</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '5px' }}>
+                      <div>
+                        <div style={{ fontSize: '9px', color: '#aaa' }}>True Anomaly (ν)</div>
+                        <div style={{ fontSize: '16px', fontWeight: '600' }}>{nuDeg.toFixed(1)}°</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '9px', color: '#aaa' }}>η from Midnight</div>
+                        <div style={{ fontSize: '16px', fontWeight: '600' }}>{etaDeg.toFixed(1)}°</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '9px', color: '#888', marginTop: '5px' }}>
+                      Sun Azimuth (α): {alphaDeg.toFixed(1)}°
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* YAW */}
+              <div style={{ padding: '10px', background: 'rgba(0,217,255,0.1)', borderRadius: '8px' }}>
+                <div style={{ fontSize: '10px', color: '#00d9ff', fontWeight: 'bold', textTransform: 'uppercase' }}>Yaw (ψ)</div>
+                <div style={{ fontSize: '20px', fontWeight: '600' }}>
+                  {(satellite.yawRad * 180 / Math.PI).toFixed(2)}°
+                </div>
+              </div>
+
+              {/* BETA */}
+              <div style={{ padding: '10px', background: 'rgba(255,215,0,0.1)', borderRadius: '8px' }}>
+                <div style={{ fontSize: '10px', color: '#ffd700', fontWeight: 'bold', textTransform: 'uppercase' }}>Beta (β)</div>
+                <div style={{ fontSize: '20px', fontWeight: '600' }}>
+                  {(Math.asin(sunVector[2]) * 180 / Math.PI).toFixed(2)}°
+                </div>
+              </div>
+
+              {/* PANEL ANGLE */}
+              <div style={{ padding: '10px', background: 'rgba(0,255,0,0.1)', borderRadius: '8px' }}>
+                <div style={{ fontSize: '10px', color: '#00ff00', fontWeight: 'bold', textTransform: 'uppercase' }}>Panel (φ)</div>
+                <div style={{ fontSize: '20px', fontWeight: '600' }}>
+                  {(satellite.panelAngleRad * 180 / Math.PI).toFixed(2)}°
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '15px', fontSize: '10px', color: '#888', textAlign: 'center' }}>
+              Status: NOMINAL • US2007 Standard
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div
+             style={{
+              position: 'absolute',
+              bottom: '40px',
+              left: '40px',
+              padding: '15px',
+              background: 'rgba(0,0,0,0.6)',
+              borderRadius: '12px',
+              color: '#aaa',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+              border: '1px solid rgba(255,255,255,0.1)',
+              pointerEvents: 'none'
+            }}
+          >
+            <div style={{ marginBottom: '5px', color: '#fff', fontWeight: 'bold' }}>CONVENTIONS</div>
+            <div>η = 0° @ Midnight</div>
+            <div>ψ = β @ Dawn (6 AM)</div>
+            <div>φ = -(180-β) @ Noon</div>
+          </div>
+        </>
       )}
     </div>
   );
