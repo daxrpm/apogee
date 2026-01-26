@@ -62,6 +62,8 @@ export function OrbitScene() {
   const [tOrbitS, setTOrbitS] = useState(0);
   const [manualNuEnabled, setManualNuEnabled] = useState(false);
   const [manualNuDeg, setManualNuDeg] = useState(0);
+  const [yawOffsetDeg, setYawOffsetDeg] = useState(0);
+  const [panelOffsetDeg, setPanelOffsetDeg] = useState(0);
 
   useEffect(() => {
     if (currentScene !== 'orbit') return;
@@ -119,7 +121,11 @@ export function OrbitScene() {
       };
     }
 
+    const yawOffsetRad = (yawOffsetDeg * Math.PI) / 180;
+    const panelOffsetRad = (panelOffsetDeg * Math.PI) / 180;
+
     const { t_s, nu_rad } = orbitData.yaw_steering;
+    const alphaRad = Math.atan2(sunVector[1], sunVector[0]);
 
     const period = orbitData.orbit_params.period_s;
     const t = period > 0 ? ((tOrbitS % period) + period) % period : tOrbitS;
@@ -128,7 +134,13 @@ export function OrbitScene() {
     let yawRad = 0;
     let panelAngleRad = 0;
     if (manualNuEnabled) {
-      const targetNu = (manualNuDeg * Math.PI) / 180;
+      // User convention: 0° (or 360°) is facing the Sun (Noon)
+      // and increases clockwise when viewed from the North pole.
+      // In ECI, true anomaly ν increases counter-clockwise, so we map:
+      // θ = alpha - ν  (clockwise-from-Sun)
+      // => ν = alpha - θ
+      const thetaRad = (manualNuDeg * Math.PI) / 180;
+      const targetNu = Math.atan2(Math.sin(alphaRad - thetaRad), Math.cos(alphaRad - thetaRad));
       let bestIdx = 0;
       let bestErr = Number.POSITIVE_INFINITY;
       for (let i = 0; i < nu_rad.length; i++) {
@@ -160,9 +172,10 @@ export function OrbitScene() {
     const z = 0; // Equatorial orbit
     const { lat, lng, alt } = eciToLatLngAlt({ x, y, z });
 
-    yawRad = Math.atan2(
-      Math.sin(Math.PI - yawRad + Math.PI / 2),
-      Math.cos(Math.PI - yawRad + Math.PI / 2)
+    yawRad = Math.atan2(Math.sin(yawRad + yawOffsetRad), Math.cos(yawRad + yawOffsetRad));
+    panelAngleRad = Math.atan2(
+      Math.sin(panelAngleRad + panelOffsetRad),
+      Math.cos(panelAngleRad + panelOffsetRad)
     );
 
     return {
@@ -173,7 +186,7 @@ export function OrbitScene() {
       panelAngleRad,
       nuRad,
     };
-  }, [orbitData, orbitParams, tOrbitS, manualNuEnabled, manualNuDeg]);
+  }, [orbitData, orbitParams, tOrbitS, manualNuEnabled, manualNuDeg, yawOffsetDeg, panelOffsetDeg, sunVector]);
 
   const handleGlobeClick = useCallback(
     (coords: { lat: number; lng: number }) => {
@@ -257,7 +270,7 @@ export function OrbitScene() {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-              <div style={{ fontWeight: 700 }}>Manual ν</div>
+              <div style={{ fontWeight: 700 }}>Manual θ</div>
               <input
                 type="checkbox"
                 checked={manualNuEnabled}
@@ -267,7 +280,7 @@ export function OrbitScene() {
 
             <div style={{ marginTop: 8, opacity: manualNuEnabled ? 1 : 0.5 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <div>ν</div>
+                <div>θ</div>
                 <div>{manualNuDeg.toFixed(0)}°</div>
               </div>
               <input
@@ -278,6 +291,38 @@ export function OrbitScene() {
                 value={manualNuDeg}
                 onChange={(e) => setManualNuDeg(Number(e.target.value))}
                 disabled={!manualNuEnabled}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div>Yaw offset</div>
+                <div>{yawOffsetDeg.toFixed(0)}°</div>
+              </div>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                step={1}
+                value={yawOffsetDeg}
+                onChange={(e) => setYawOffsetDeg(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div>Panel offset</div>
+                <div>{panelOffsetDeg.toFixed(0)}°</div>
+              </div>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                step={1}
+                value={panelOffsetDeg}
+                onChange={(e) => setPanelOffsetDeg(Number(e.target.value))}
                 style={{ width: '100%' }}
               />
             </div>
@@ -315,21 +360,21 @@ export function OrbitScene() {
                 const alphaRad = Math.atan2(sunVector[1], sunVector[0]);
                 const alphaDeg = ((alphaRad * 180 / Math.PI) % 360 + 360) % 360;
                 
-                // η = ν - α - 180° (measured from Midnight)
-                let etaDeg = nuDeg - alphaDeg - 180;
-                etaDeg = ((etaDeg % 360) + 360) % 360;
+                // θ = α - ν (measured from Sun / Noon, clockwise from North pole)
+                let thetaDeg = alphaDeg - nuDeg;
+                thetaDeg = ((thetaDeg % 360) + 360) % 360;
                 
                 return (
                   <div style={{ padding: '10px', background: 'rgba(255,140,0,0.15)', borderRadius: '8px', marginBottom: '5px' }}>
                     <div style={{ fontSize: '10px', color: '#ff8c00', fontWeight: 'bold', textTransform: 'uppercase' }}>📍 Orbit Position</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '5px' }}>
                       <div>
-                        <div style={{ fontSize: '9px', color: '#aaa' }}>True Anomaly (ν)</div>
-                        <div style={{ fontSize: '16px', fontWeight: '600' }}>{nuDeg.toFixed(1)}°</div>
+                        <div style={{ fontSize: '9px', color: '#aaa' }}>θ from Sun (clockwise)</div>
+                        <div style={{ fontSize: '16px', fontWeight: '600' }}>{thetaDeg.toFixed(1)}°</div>
                       </div>
                       <div>
-                        <div style={{ fontSize: '9px', color: '#aaa' }}>η from Midnight</div>
-                        <div style={{ fontSize: '16px', fontWeight: '600' }}>{etaDeg.toFixed(1)}°</div>
+                        <div style={{ fontSize: '9px', color: '#aaa' }}>True Anomaly (ν)</div>
+                        <div style={{ fontSize: '16px', fontWeight: '600' }}>{nuDeg.toFixed(1)}°</div>
                       </div>
                     </div>
                     <div style={{ fontSize: '9px', color: '#888', marginTop: '5px' }}>
@@ -386,9 +431,8 @@ export function OrbitScene() {
             }}
           >
             <div style={{ marginBottom: '5px', color: '#fff', fontWeight: 'bold' }}>CONVENTIONS</div>
-            <div>η = 0° @ Midnight</div>
-            <div>ψ = β @ Dawn (6 AM)</div>
-            <div>φ = -(180-β) @ Noon</div>
+            <div>θ = 0° facing Sun (Noon)</div>
+            <div>θ increases clockwise (viewed from North pole)</div>
           </div>
         </>
       )}
