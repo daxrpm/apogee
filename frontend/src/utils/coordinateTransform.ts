@@ -178,6 +178,23 @@ export function findTimeIndex(times: number[], t: number): number {
   return low;
 }
 
+ function wrapPi(angleRad: number): number {
+  const twoPi = 2 * Math.PI;
+  let a = (angleRad + Math.PI) % twoPi;
+  if (a < 0) a += twoPi;
+  return a - Math.PI;
+ }
+
+ function shortestAngleDelta(fromRad: number, toRad: number): number {
+  const d = toRad - fromRad;
+  return Math.atan2(Math.sin(d), Math.cos(d));
+ }
+
+ function lerpAngle(fromRad: number, toRad: number, t: number): number {
+  const delta = shortestAngleDelta(fromRad, toRad);
+  return wrapPi(fromRad + delta * t);
+ }
+
 /**
  * Interpolates a trajectory value using Catmull-Rom spline.
  * Falls back to linear interpolation at boundaries.
@@ -210,6 +227,24 @@ export function interpolateValue(
   // Linear fallback at boundaries
   return lerp(values[i], values[i + 1], alpha);
 }
+
+ export function interpolateAngle(
+  times: number[],
+  anglesRad: number[],
+  t: number
+ ): number {
+  if (times.length === 0 || anglesRad.length === 0) return 0;
+  if (times.length === 1) return wrapPi(anglesRad[0]);
+  if (t <= times[0]) return wrapPi(anglesRad[0]);
+  if (t >= times[times.length - 1]) return wrapPi(anglesRad[anglesRad.length - 1]);
+
+  const i = findTimeIndex(times, t);
+  const t0 = times[i];
+  const t1 = times[i + 1];
+  const alpha = (t - t0) / (t1 - t0);
+
+  return lerpAngle(anglesRad[i], anglesRad[i + 1], alpha);
+ }
 
 /**
  * Interpolates position at a given time.

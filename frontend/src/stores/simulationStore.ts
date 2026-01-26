@@ -116,7 +116,7 @@ const initialState: SimulationState = {
   isPlaying: false,
   enginesActive: false,
   currentStage: 1,
-  sunVector: [1, 0, 0],
+  sunVector: [0.9397, 0, 0.3420], // ~20 degrees elevation (cos(20), 0, sin(20))
   skipLaunch3D: false,
   orbitParams: null,
   orbitData: null,
@@ -180,6 +180,20 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       const r_m = result.trajectory?.orbit?.semi_major_axis;
       const nu_initial_rad = result.trajectory?.lambda_rad?.[result.trajectory.lambda_rad.length - 1];
 
+      // Calculate sun vector aligned with satellite's initial position
+      // Sun azimuth = nu_initial_rad → satellite starts at Noon (η = 180°, facing sun)
+      // Beta = 20° for visible yaw steering effects
+      let newSunVector: [number, number, number] = state.sunVector;
+      if (typeof nu_initial_rad === 'number') {
+        const beta = 20 * Math.PI / 180; // 20 degrees elevation
+        const alpha = nu_initial_rad; // Sun azimuth aligned with satellite initial position
+        newSunVector = [
+          Math.cos(beta) * Math.cos(alpha),
+          Math.cos(beta) * Math.sin(alpha),
+          Math.sin(beta),
+        ];
+      }
+
       set({
         launchData: result,
         isLoading: false,
@@ -192,6 +206,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         orbitData: null,
         orbitLoading: false,
         orbitError: null,
+        sunVector: newSunVector,
       });
 
       void get().fetchOrbitTrajectory();
