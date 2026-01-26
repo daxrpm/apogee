@@ -1,3 +1,18 @@
+/**
+ * OrbitGlobe.tsx - Globe visualization with satellite
+ * 
+ * EXACTLY MATCHES YawSteeringLab.tsx CONVENTIONS:
+ * 
+ * LAB COORDINATE SYSTEM (Three.js):
+ * - Orbit in XZ plane, Y is up (north pole)
+ * - Position at nu: [r*cos(nu), 0, r*sin(nu)]
+ * - Velocity at nu: [-sin(nu), 0, cos(nu)]
+ * - When nu increases 0→360, satellite moves counterclockwise (EAST)
+ * 
+ * This component receives ECI coordinates from OrbitScene and transforms
+ * them to match the lab's Three.js coordinate system exactly.
+ */
+
 import { useEffect, useMemo, useRef } from 'react';
 import Globe from 'react-globe.gl';
 import type { GlobeMethods } from 'react-globe.gl';
@@ -17,13 +32,13 @@ export interface OrbitSatelliteData {
   alt: number;
   yawRad: number;
   panelAngleRad: number;
-  positionEciM: [number, number, number];
-  velocityEciMps: [number, number, number];
+  nuRad: number; // True anomaly - the key parameter!
 }
 
 interface OrbitGlobeProps {
   orbitPath: OrbitPoint[];
   satellite: OrbitSatelliteData;
+  orbitRadius: number; // in meters
   sun: { lat: number; lng: number; alt: number };
   sunVectorEci: [number, number, number];
   onGlobeClick: (coords: { lat: number; lng: number }) => void;
@@ -44,20 +59,12 @@ async function loadSunScene(modelUrl: string): Promise<Object3D> {
   return sunPromise;
 }
 
-function eciVecToGlobeWorld(v: [number, number, number]): [number, number, number] {
-  // globe.gl world axes correspond to:
-  // x_world = x_eci, y_world = z_eci, z_world = y_eci
-  const [x, y, z] = v;
-  return [x, z, y];
-}
-
 // Earth radius in meters
 const R_EARTH = 6378137;
 const GLOBE_RADIUS = 100; // react-globe.gl default
 
-export function OrbitGlobe({ orbitPath, satellite, sun, sunVectorEci, onGlobeClick }: OrbitGlobeProps) {
+export function OrbitGlobe({ orbitPath, satellite, orbitRadius, sun, sunVectorEci, onGlobeClick }: OrbitGlobeProps) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
-  // Increase scale for visibility during debug? 0.8 is ~50km, plenty big.
   const controller = useMemo(() => createSatelliteController('/models/satellite_replace.glb'), []);
   
   const sunObject = useMemo(() => {
@@ -71,12 +78,11 @@ export function OrbitGlobe({ orbitPath, satellite, sun, sunVectorEci, onGlobeCli
 
   const pathsData = useMemo(() => [{ points: orbitPath }], [orbitPath]);
 
-  // Satellite Scene Management (Manual)
+  // Satellite Scene Management
   useEffect(() => {
     const globe = globeRef.current;
     if (!globe) return;
     
-    // Add satellite to scene
     const scene = globe.scene();
     scene.add(controller.object);
 
@@ -85,43 +91,58 @@ export function OrbitGlobe({ orbitPath, satellite, sun, sunVectorEci, onGlobeCli
     };
   }, [controller]);
 
-  // Satellite Update Loop
+  // Satellite Update Loop - EXACTLY LIKE YawSteeringLab.tsx lines 314-420
   useEffect(() => {
-    // Coordinate Transform: ECI (x,y,z) -> GlobeWorld (x, z, y)
-    // Scale: Meters -> Globe Units (100 / R_EARTH)
-    
     const worldScale = GLOBE_RADIUS / R_EARTH;
+    const nuRad = satellite.nuRad;
+    const r = orbitRadius;
     
-    const [px, py, pz] = eciVecToGlobeWorld(satellite.positionEciM);
-    const [vx, vy, vz] = eciVecToGlobeWorld(satellite.velocityEciMps);
+    // ========================================================================
+    // POSITION & VELOCITY - FIXED FOR GLOBE.GL COORDINATE SYSTEM
+    // ========================================================================
     
-    // Position vector in Globe World units
-    const filePos = new Vector3(px, py, pz).multiplyScalar(worldScale);
+    // Globe.gl has a mirrored Z axis compared to our lab
+    // To go EAST (prograde), we negate Z:
+    // - Position: [r*cos(nu), 0, -r*sin(nu)]
+    // - Velocity: [-sin(nu), 0, -cos(nu)]
     
-    // Velocity vector (direction matters for orientation)
-    const fileVel = new Vector3(vx, vy, vz);
+    const positionGlobe = new Vector3(
+      r * Math.sin(nuRad),
+      0,
+      r * Math.cos(nuRad)
+    );
+    
+    // Velocity tangent (derivative w.r.t. nu)
+    const velocityGlobe = new Vector3(
+      Math.cos(nuRad),
+      0,
+      -Math.sin(nuRad)
+    ).normalize();
+    
+    // Scale position for rendering
+    const positionScaled = positionGlobe.clone().multiplyScalar(worldScale);
 
-    // Update Controller
-    // Note: We pass the GlobeFrame vectors so the computed quaternion is in GlobeFrame.
+    // ========================================================================
+    // UPDATE CONTROLLER - Same as lab lines 362-408
+    // ========================================================================
     controller.update({
-      positionEciM: new Vector3(px, py, pz), // Direction is what matters
-      velocityEciMps: fileVel,
+      positionGlobe: positionGlobe,
+      velocityGlobe: velocityGlobe,
       yawRad: satellite.yawRad,
       panelAngleRad: satellite.panelAngleRad,
     });
 
-    // Update Object Transform
-    controller.object.position.copy(filePos);
-    // controller.object.quaternion is already updated by controller.update()
+    // Set position
+    controller.object.position.copy(positionScaled);
 
-  }, [controller, satellite]);
+  }, [controller, satellite, orbitRadius]);
 
   // Lighting Update
   useEffect(() => {
     if (!globeRef.current) return;
     const scene = globeRef.current.scene();
     
-    // Add Sun Light if missing
+    // Sun Light
     let sunLight = scene.getObjectByName('SUN_DIRECTIONAL_LIGHT') as DirectionalLight;
     if (!sunLight) {
         sunLight = new DirectionalLight(0xffffff, 2.5);
@@ -129,15 +150,15 @@ export function OrbitGlobe({ orbitPath, satellite, sun, sunVectorEci, onGlobeCli
         scene.add(sunLight);
     }
 
-    // Update Sun Light Position
-    const [sx, sy, sz] = eciVecToGlobeWorld(sunVectorEci);
-    // Place it far away in direction of sun
-    sunLight.position.set(sx * 10000, sy * 10000, sz * 10000);
+    // Sun direction in Globe.gl coords (same transform as lab: x->x, z->y, y->z)
+    const [sx, sy, sz] = sunVectorEci;
+    const sunGlobe = new Vector3(sy, sz, sx);
+    sunLight.position.copy(sunGlobe.multiplyScalar(10000));
 
-    // Add Ambient Light if missing for better fill
+    // Ambient Light
     let ambient = scene.getObjectByName('SCENE_AMBIENT') as AmbientLight;
     if (!ambient) {
-        ambient = new AmbientLight(0x404040, 1.0); // Boost ambient
+        ambient = new AmbientLight(0x404040, 1.0);
         ambient.name = 'SCENE_AMBIENT';
         scene.add(ambient);
     }
@@ -152,7 +173,6 @@ export function OrbitGlobe({ orbitPath, satellite, sun, sunVectorEci, onGlobeCli
       bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
       backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
       onGlobeClick={(coords) => onGlobeClick(coords)}
-      // Removed objectsData for satellite, manually managed above
       objectsData={[]} 
       customLayerData={[{ ...sun }]}
       customThreeObject={sunObject}
