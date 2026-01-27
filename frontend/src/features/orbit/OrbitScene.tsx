@@ -40,7 +40,7 @@ interface InterpolatedData {
 
 const R_EARTH_M = 6378137;
 const GLOBE_RADIUS = 100;
-const ANIMATION_TIME_SCALE = 50;
+const ANIMATION_TIME_SCALE = 40;
 
 export function OrbitScene() {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
