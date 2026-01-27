@@ -26,6 +26,27 @@ The challenge: find the optimal control parameters:
 uv run apogee-launch --h-target-km 200 --payload-kg 5000
 ```
 
+### Verify GPU Execution (JAX)
+
+Run with `--verbose` to print the active backend and devices:
+
+```bash
+uv run apogee-launch --h-target-km 200 --payload-kg 5000 --verbose --no-trajectory
+```
+
+You should see lines like:
+
+```text
+JAX backend: gpu
+JAX devices: [CudaDevice(id=0), ...]
+```
+
+To observe utilization during the run:
+
+```bash
+watch -n 0.5 nvidia-smi
+```
+
 This outputs:
 
 ```json

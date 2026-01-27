@@ -36,6 +36,21 @@ def simulate_ascent_final(config: AscentConfig) -> FinalState:
 
 More efficient when only the terminal state is needed.
 
+### `simulate_ascent_final_core`
+
+JIT-friendly core integration routine used by the shooting solver to push the expensive ODE integration onto the selected JAX backend (CPU/GPU).
+
+This function:
+
+- takes a pre-built `AtmosphereTable` argument (so it is not constructed inside `jax.jit`)
+- avoids Python-side checks/raises that depend on traced values
+
+```python
+def simulate_ascent_final_core(config: AscentConfig, atmos: AtmosphereTable) -> tuple[Array, Array]:
+```
+
+For backwards compatibility, `simulate_ascent_final_unchecked` remains available as an alias.
+
 ## Event Functions
 
 ```python

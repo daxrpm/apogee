@@ -133,6 +133,27 @@ uv run mypy packages/
     pip install jax-metal
     ```
 
+!!! note "JAX on NVIDIA GPUs (CUDA 12)"
+    Apogee uses JAX. To run with NVIDIA GPUs you must install a CUDA-enabled `jaxlib`.
+
+    This project uses `uv`, so make sure your environment and `uv.lock` stay consistent.
+
+    ```bash
+    # Install CUDA 12 build of JAX (into the uv-managed venv)
+    uv pip uninstall -y jax jaxlib jax-cuda12-plugin jax-cuda12-pjrt
+    uv pip install -U "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+    # Ensure the lockfile pins the same versions used by `uv run`
+    uv lock --upgrade-package jax --upgrade-package jaxlib
+    uv sync
+    ```
+
+    Verify that JAX sees the GPU:
+
+    ```bash
+    uv run python -c "import jax; print(jax.default_backend()); print(jax.devices())"
+    ```
+
 !!! note "First Run Slowness"
     The first simulation takes longer (~20s) due to JAX JIT compilation.
     Subsequent runs are much faster (~0.5s).
