@@ -62,6 +62,14 @@ def main(
         logging.getLogger('apogee_physics.simulate').setLevel(logging.WARNING)
     
     logging.getLogger('apogee_launch').setLevel(log_level)
+
+    try:
+        import jax
+
+        logger.info(f"JAX backend: {jax.default_backend()}")
+        logger.info(f"JAX devices: {jax.devices()}")
+    except Exception:
+        logger.warning("Failed to query JAX backend/devices", exc_info=debug)
     
     kwargs = {}
     if theta0_deg is not None:

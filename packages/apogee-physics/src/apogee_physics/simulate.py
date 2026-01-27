@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 import optimistix as optx
 
-from .atmosphere import build_atmosphere_table
+from .atmosphere import AtmosphereTable, build_atmosphere_table
 from .dynamics import compute_derived, rhs_general, rhs_gravity_turn, rhs_vertical, rhs_coast
 from .orbit import orbit_diagnostics
 from .trajectory import OrbitDiagnostics, Trajectory
@@ -490,7 +490,7 @@ def simulate_ascent_final(config: AscentConfig) -> tuple[Array, Array]:
 
     # Phase A: Vertical Ascent [Report Section 5.1]
     term_vertical = diffrax.ODETerm(_term_rhs_vertical)
-    h_pitch_over = max(float(numerics.h_pitch_over), 2000.0)
+    h_pitch_over = jnp.maximum(jnp.asarray(numerics.h_pitch_over), 2000.0)
     args_vertical = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), h_pitch_over)
     event_pitch_over = diffrax.Event((_cond_pitch_over, _cond_ground), root_finder=root_finder)
 
@@ -507,8 +507,14 @@ def simulate_ascent_final(config: AscentConfig) -> tuple[Array, Array]:
         atol=numerics.atol,
         max_steps=numerics.max_steps,
     )
-    if result_a != diffrax.RESULTS.event_occurred or _event_mask_is(event_mask_a, 1):
-        raise RuntimeError("Vertical phase failed (pitch-over not reached or ground impact).")
+    try:
+        if result_a != diffrax.RESULTS.event_occurred or _event_mask_is(event_mask_a, 1):
+            raise RuntimeError("Vertical phase failed (pitch-over not reached or ground impact).")
+    except Exception as e:
+        if isinstance(e, jax.errors.TracerBoolConversionError):
+            pass
+        else:
+            raise
 
     # Transition: Pitch-Over
     y_po = y_a.at[_GAMMA].set(jnp.pi / 2.0 - numerics.theta0)
@@ -531,8 +537,14 @@ def simulate_ascent_final(config: AscentConfig) -> tuple[Array, Array]:
         atol=numerics.atol,
         max_steps=numerics.max_steps,
     )
-    if result_b != diffrax.RESULTS.event_occurred or _event_mask_is(event_mask_b, 1):
-        raise RuntimeError("Stage 1 failed (burnout not reached or ground impact).")
+    try:
+        if result_b != diffrax.RESULTS.event_occurred or _event_mask_is(event_mask_b, 1):
+            raise RuntimeError("Stage 1 failed (burnout not reached or ground impact).")
+    except Exception as e:
+        if isinstance(e, jax.errors.TracerBoolConversionError):
+            pass
+        else:
+            raise
 
     y_sep = y_b.at[_M].set(y_b[_M] - vehicle.m1_dry)
 
@@ -554,8 +566,14 @@ def simulate_ascent_final(config: AscentConfig) -> tuple[Array, Array]:
         atol=numerics.atol,
         max_steps=numerics.max_steps,
     )
-    if result_c == diffrax.RESULTS.event_occurred:
-        raise RuntimeError("Coast failed (ground impact).")
+    try:
+        if result_c == diffrax.RESULTS.event_occurred:
+            raise RuntimeError("Coast failed (ground impact).")
+    except Exception as e:
+        if isinstance(e, jax.errors.TracerBoolConversionError):
+            pass
+        else:
+            raise
 
     # Stage 2 burn
     mission = config.mission
@@ -578,7 +596,112 @@ def simulate_ascent_final(config: AscentConfig) -> tuple[Array, Array]:
         atol=numerics.atol,
         max_steps=numerics.max_steps,
     )
-    if result_d == diffrax.RESULTS.event_occurred and _event_mask_is(event_mask_d, 1):
-        raise RuntimeError("Stage 2 failed (ground impact).")
+    try:
+        if result_d == diffrax.RESULTS.event_occurred and _event_mask_is(event_mask_d, 1):
+            raise RuntimeError("Stage 2 failed (ground impact).")
+    except Exception as e:
+        if isinstance(e, jax.errors.TracerBoolConversionError):
+            pass
+        else:
+            raise
 
     return t_d, y_d
+
+
+def simulate_ascent_final_core(config: AscentConfig, atmos: AtmosphereTable) -> tuple[Array, Array]:
+    earth = config.earth
+    vehicle = config.vehicle
+    numerics = config.numerics
+
+    m1_prop = vehicle.stage1.thrust * vehicle.t1_burn / (vehicle.stage1.isp * earth.g0)
+    m1_end = vehicle.m0 - m1_prop
+
+    y0 = jnp.array([earth.r_e + 1.0, 0.0, 0.0, jnp.pi / 2.0, vehicle.m0])
+
+    solver = diffrax.Tsit5()
+    root_finder = optx.Newton(rtol=numerics.root_rtol, atol=numerics.root_atol, norm=optx.rms_norm)
+
+    term_vertical = diffrax.ODETerm(_term_rhs_vertical)
+    h_pitch_over = jnp.maximum(jnp.asarray(numerics.h_pitch_over), 2000.0)
+    args_vertical = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), h_pitch_over)
+    event_pitch_over = diffrax.Event((_cond_pitch_over, _cond_ground), root_finder=root_finder)
+
+    t_a, y_a, _result_a, _event_mask_a = _solve_segment_final(
+        term=term_vertical,
+        solver=solver,
+        t0=0.0,
+        t1=numerics.t_max,
+        dt0=numerics.dt0,
+        y0=y0,
+        args=args_vertical,
+        event=event_pitch_over,
+        rtol=numerics.rtol,
+        atol=numerics.atol,
+        max_steps=numerics.max_steps,
+    )
+
+    y_po = y_a.at[_GAMMA].set(jnp.pi / 2.0 - numerics.theta0)
+
+    term_s1 = diffrax.ODETerm(_term_rhs_gravity_turn)
+    args_s1 = (earth, vehicle.stage1, atmos, jnp.array(numerics.v_eps), m1_end)
+    event_s1 = diffrax.Event((_cond_stage1_burnout, _cond_ground), root_finder=root_finder)
+
+    t_b, y_b, _result_b, _event_mask_b = _solve_segment_final(
+        term=term_s1,
+        solver=solver,
+        t0=t_a,
+        t1=numerics.t_max,
+        dt0=numerics.dt0,
+        y0=y_po,
+        args=args_s1,
+        event=event_s1,
+        rtol=numerics.rtol,
+        atol=numerics.atol,
+        max_steps=numerics.max_steps,
+    )
+
+    y_sep = y_b.at[_M].set(y_b[_M] - vehicle.m1_dry)
+
+    term_coast = diffrax.ODETerm(_term_rhs_coast)
+    args_coast = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps))
+    event_ground = diffrax.Event(_cond_ground, root_finder=root_finder)
+
+    t_c, y_c, _result_c, _event_mask_c = _solve_segment_final(
+        term=term_coast,
+        solver=solver,
+        t0=t_b,
+        t1=t_b + numerics.t_coast,
+        dt0=numerics.dt0,
+        y0=y_sep,
+        args=args_coast,
+        event=event_ground,
+        rtol=numerics.rtol,
+        atol=numerics.atol,
+        max_steps=numerics.max_steps,
+    )
+
+    mission = config.mission
+    m_min_s2 = vehicle.m2_dry + mission.payload_mass
+
+    term_s2 = diffrax.ODETerm(_term_rhs_stage2_steer)
+    args_s2 = (earth, vehicle.stage2, atmos, jnp.array(numerics.v_eps), m_min_s2, jnp.array(numerics.alpha2))
+    event_s2 = diffrax.Event((_cond_fuel_depletion, _cond_ground), root_finder=root_finder)
+
+    t_d, y_d, _result_d, _event_mask_d = _solve_segment_final(
+        term=term_s2,
+        solver=solver,
+        t0=t_c,
+        t1=t_c + numerics.t_burn2,
+        dt0=numerics.dt0,
+        y0=y_c,
+        args=args_s2,
+        event=event_s2,
+        rtol=numerics.rtol,
+        atol=numerics.atol,
+        max_steps=numerics.max_steps,
+    )
+
+    return t_d, y_d
+
+
+simulate_ascent_final_unchecked = simulate_ascent_final_core

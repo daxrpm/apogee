@@ -9,13 +9,16 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .simulate import simulate_ascent, simulate_ascent_final
+from .atmosphere import build_atmosphere_table
+from .simulate import simulate_ascent, simulate_ascent_final_core
 from .trajectory import Trajectory, trajectory_to_dict
 from .types import AscentConfig
 
 logger = logging.getLogger(__name__)
 
 Array = jax.Array
+
+_SIMULATE_ASCENT_FINAL_JIT = jax.jit(simulate_ascent_final_core)
 
 
 def compute_residuals(u: np.ndarray, base_config: AscentConfig) -> np.ndarray:
@@ -40,8 +43,10 @@ def compute_residuals(u: np.ndarray, base_config: AscentConfig) -> np.ndarray:
     numerics_new = replace(base_config.numerics, theta0=theta0, t_coast=t_coast, t_burn2=t_burn2, alpha2=alpha2)
     config = replace(base_config, numerics=numerics_new)
 
+    atmos = build_atmosphere_table(z_max_m=config.atmosphere_z_max, dz_m=config.atmosphere_dz)
+
     try:
-        _t_final, y_final = simulate_ascent_final(config)
+        _t_final, y_final = _SIMULATE_ASCENT_FINAL_JIT(config, atmos)
     except Exception as e:
         logger.debug(f"Simulation failed: {type(e).__name__}")
         return np.array([1e3, 1e3, 1e3])
@@ -333,10 +338,11 @@ def solve_circular_orbit(base_config: AscentConfig) -> tuple[AscentConfig, Traje
         if math.isfinite(n0) and n0 < 100.0:
             scored.append((n0, _project(u0)))
     scored.sort(key=lambda x: x[0])
-    logger.info(f"Found {len(scored)} feasible candidates, best initial ||F||={scored[0][0]:.3e}")
     if len(scored) == 0:
         logger.error("No feasible initial guesses found")
         raise RuntimeError("No feasible initial guesses found for shooting")
+
+    logger.info(f"Found {len(scored)} feasible candidates, best initial ||F||={scored[0][0]:.3e}")
 
     last_err: Exception | None = None
     best_result = None

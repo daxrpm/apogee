@@ -31,6 +31,15 @@ def compute_residuals(
 2. $e$ (eccentricity)
 3. $\gamma$ (flight-path angle)
 
+## GPU Acceleration Notes (JAX)
+
+The multistart loop is written in Python/NumPy, but the expensive physics integration is executed through a `jax.jit`-compiled path:
+
+- `compute_residuals` builds the `AtmosphereTable` outside of `jax.jit`
+- the ODE integration is performed by `simulate_ascent_final_core(config, atmos)` compiled via `jax.jit`
+
+This avoids common JAX tracing pitfalls (e.g. Python `lru_cache` inside `jit`) and enables GPU execution when `jax.default_backend()` is `gpu`.
+
 ### `solve_circular_orbit`
 
 Main optimization function.

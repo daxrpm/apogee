@@ -26,6 +26,17 @@ uv run apogee-launch --h-target-km 200 --payload-kg 5000 --plot
 uv run apogee-launch --h-target-km 200 --payload-kg 5000 --verbose
 ```
 
+## JAX Backend / GPU Logs
+
+When running with `--verbose`, the CLI prints which JAX backend is active and which devices are visible:
+
+```text
+JAX backend: gpu
+JAX devices: [CudaDevice(id=0), ...]
+```
+
+If this shows `cpu`, verify that a CUDA-enabled `jaxlib` is installed and that `uv.lock` matches your environment.
+
 ## Python API
 
 ```python
