@@ -48,7 +48,7 @@ export function OrbitScene() {
   const rafIdRef = useRef<number | null>(null);
   const lastAnimTRef = useRef<number | null>(null);
 
-  const satelliteScaleFactorRef = useRef<number>(40);
+  const satelliteScaleFactorRef = useRef<number>(50);
 
   const [globeSize, setGlobeSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
