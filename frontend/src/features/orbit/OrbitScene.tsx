@@ -1,441 +1,538 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSimulationStore } from '../../stores/simulationStore';
-import { interpolateAngle, interpolateValue, R_EARTH } from '../../utils/coordinateTransform';
-import { OrbitGlobe, type OrbitPoint, type OrbitSatelliteData } from './OrbitGlobe';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Globe from 'react-globe.gl';
+import type { GlobeMethods } from 'react-globe.gl';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-/**
- * Convert ECI position to latitude/longitude/altitude
- * Standard ECI convention: X→vernal equinox, Y→90°E, Z→North pole
- */
-function eciToLatLngAlt(pos: { x: number; y: number; z: number }): { lat: number; lng: number; alt: number } {
-  const r = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
-  if (r <= 0) return { lat: 0, lng: 0, alt: 0 };
-
-  const lat = Math.asin(pos.z / r);
-  const lng = Math.atan2(pos.y, pos.x);
-  const alt = Math.max(0, (r - R_EARTH) / R_EARTH);
-
-  return { lat: (lat * 180) / Math.PI, lng: (lng * 180) / Math.PI, alt };
+interface TrajectoryResponse {
+  orbit_params: {
+    semi_major_axis_m: number;
+    period_s: number;
+    mean_motion_rad_s: number;
+  };
+  trajectory: {
+    x_m: number[];
+    y_m: number[];
+    z_m: number[];
+  };
+  yaw_steering: {
+    t_s: number[];
+    nu_rad: number[];
+    yaw_rad: number[];
+    yaw_deg: number[];
+    beta_rad: number[];
+    beta_deg: number[];
+    panel_angle_rad: number[];
+    panel_angle_deg: number[];
+  };
 }
 
-/**
- * Convert ECI unit vector to latitude/longitude
- */
-function vecToLatLng(vec: [number, number, number]): { lat: number; lng: number } {
-  const [x, y, z] = vec;
-  const r = Math.sqrt(x * x + y * y + z * z);
-  if (r <= 0) return { lat: 0, lng: 0 };
-
-  const lat = Math.asin(z / r);
-  const lng = Math.atan2(y, x);
-  
-  return { lat: (lat * 180) / Math.PI, lng: (lng * 180) / Math.PI };
+interface InterpolatedData {
+  yaw_rad: number;
+  yaw_deg: number;
+  beta_rad: number;
+  beta_deg: number;
+  panel_angle_rad: number;
+  panel_angle_deg: number;
+  sun_body: [number, number, number];
 }
 
-/**
- * Convert latitude/longitude to ECI unit vector
- */
-function latLngToEciUnit(lat: number, lng: number): [number, number, number] {
-  const latRad = (lat * Math.PI) / 180;
-  const lngRad = (lng * Math.PI) / 180;
-  const cosLat = Math.cos(latRad);
-  
-  return [
-    cosLat * Math.cos(lngRad),  // X
-    cosLat * Math.sin(lngRad),  // Y
-    Math.sin(latRad)             // Z
-  ];
-}
+const R_EARTH_M = 6378137;
+const GLOBE_RADIUS = 100;
 
 export function OrbitScene() {
-  const {
-    currentScene,
-    orbitParams,
-    orbitData,
-    orbitLoading,
-    orbitError,
-    sunVector,
-    setSunVector,
-    fetchOrbitTrajectory,
-  } = useSimulationStore();
+  const globeRef = useRef<GlobeMethods | undefined>(undefined);
+  const globeContainerRef = useRef<HTMLDivElement | null>(null);
+  const rafIdRef = useRef<number | null>(null);
 
-  const [tOrbitS, setTOrbitS] = useState(0);
-  const [manualNuEnabled, setManualNuEnabled] = useState(false);
-  const [manualNuDeg, setManualNuDeg] = useState(0);
-  const [yawOffsetDeg, setYawOffsetDeg] = useState(0);
-  const [panelOffsetDeg, setPanelOffsetDeg] = useState(0);
+  const [globeSize, setGlobeSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+
+  const satelliteBaseQuatRef = useRef<THREE.Quaternion | null>(null);
+  const solarPanelsBaseQuatRef = useRef<THREE.Quaternion | null>(null);
+
+  const satelliteRef = useRef<THREE.Group | null>(null);
+  const solarPanelsRef = useRef<THREE.Object3D | null>(null);
+  const sunRef = useRef<THREE.Object3D | null>(null);
+  const lvlhAxesRef = useRef<THREE.Group | null>(null);
+  const bodyAxesRef = useRef<THREE.Group | null>(null);
+  const orbitLineRef = useRef<THREE.Line | null>(null);
+
+  const [nu, setNu] = useState(0);
+  const [sunAzimuth, setSunAzimuth] = useState(0);
+  const [sunElevation, setSunElevation] = useState(20);
+  const [orbitRadius] = useState(6571);
+  const [trajectoryData, setTrajectoryData] = useState<TrajectoryResponse | null>(null);
+  const [interpolatedData, setInterpolatedData] = useState<InterpolatedData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showAxes, setShowAxes] = useState(true);
 
   useEffect(() => {
-    if (currentScene !== 'orbit') return;
-    if (!orbitParams) return;
-    if (orbitData || orbitLoading) return;
-    void fetchOrbitTrajectory();
-  }, [currentScene, orbitParams, orbitData, orbitLoading, fetchOrbitTrajectory]);
+    const el = globeContainerRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      setGlobeSize({ width: Math.max(0, Math.floor(rect.width)), height: Math.max(0, Math.floor(rect.height)) });
+    };
+
+    update();
+    const ro = new ResizeObserver(() => update());
+    ro.observe(el);
+    window.addEventListener('resize', update);
+
+    return () => {
+      window.removeEventListener('resize', update);
+      ro.disconnect();
+    };
+  }, []);
+
+  const deg2rad = useCallback((deg: number) => (deg * Math.PI) / 180, []);
+
+  const getSunECI = useCallback(() => {
+    const azRad = deg2rad(sunAzimuth);
+    const elRad = deg2rad(sunElevation);
+
+    const sun_x = Math.cos(elRad) * Math.cos(azRad);
+    const sun_y = Math.cos(elRad) * Math.sin(azRad);
+    const sun_z = Math.sin(elRad);
+
+    return { sun_x, sun_y, sun_z };
+  }, [deg2rad, sunAzimuth, sunElevation]);
+
+  const getSunDirThreeJS = useCallback(() => {
+    const { sun_x, sun_y, sun_z } = getSunECI();
+    return new THREE.Vector3(sun_x, sun_z, sun_y).normalize();
+  }, [getSunECI]);
 
   useEffect(() => {
-    if (currentScene !== 'orbit') return;
+    const globe = globeRef.current;
+    if (!globe) return;
 
-    let raf = 0;
-    let last = performance.now();
+    const scene = globe.scene();
+    scene.background = new THREE.Color(0x0a0a0a);
 
-    const loop = (now: number) => {
-      const dt = Math.max(0, (now - last) / 1000);
-      last = now;
-      setTOrbitS((t) => t + dt * 20);
-      raf = requestAnimationFrame(loop);
-    };
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    scene.add(new THREE.AxesHelper(8000 * (GLOBE_RADIUS / R_EARTH_M)));
 
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [currentScene]);
+    const lvlhAxes = new THREE.Group();
+    lvlhAxesRef.current = lvlhAxes;
+    scene.add(lvlhAxes);
 
-  const orbitPath = useMemo<OrbitPoint[]>(() => {
-    if (!orbitData) return [];
-    const { x_m, y_m, z_m } = orbitData.trajectory;
-    const points: OrbitPoint[] = [];
-    for (let i = 0; i < x_m.length; i++) {
-      const { lat, lng, alt } = eciToLatLngAlt({ x: x_m[i], y: y_m[i], z: z_m[i] });
-      points.push({ lat, lng, alt });
+    const bodyAxes = new THREE.Group();
+    bodyAxesRef.current = bodyAxes;
+    scene.add(bodyAxes);
+
+    const worldScale = GLOBE_RADIUS / R_EARTH_M;
+    const r_m = orbitRadius * 1000;
+
+    const orbitPoints: THREE.Vector3[] = [];
+    for (let i = 0; i <= 360; i++) {
+      const angle = (i * Math.PI) / 180;
+      orbitPoints.push(new THREE.Vector3(r_m * Math.cos(angle), 0, r_m * Math.sin(angle)).multiplyScalar(worldScale));
     }
-    return points;
-  }, [orbitData]);
+    const orbitLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(orbitPoints),
+      new THREE.LineBasicMaterial({ color: 0x00ff00, opacity: 0.4, transparent: true })
+    );
+    orbitLineRef.current = orbitLine;
+    scene.add(orbitLine);
 
-  const sun = useMemo(() => {
-    const { lat, lng } = vecToLatLng(sunVector);
-    return {
-      lat,
-      lng,
-      alt: 2.5,
+    const loader = new GLTFLoader();
+
+    loader.load('/models/satellite_replace.glb', (gltf) => {
+      const satellite = gltf.scene;
+      satellite.scale.setScalar(300 * worldScale * 1000);
+
+      const baseRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
+      satelliteBaseQuatRef.current = baseRotation;
+
+      satelliteRef.current = satellite;
+      scene.add(satellite);
+
+      const panels = satellite.getObjectByName('Solar_Panels_28') || satellite.getObjectByName('Object_56');
+      if (panels) {
+        solarPanelsRef.current = panels;
+        solarPanelsBaseQuatRef.current = panels.quaternion.clone();
+      }
+    });
+
+    loader.load('/models/sun.glb', (gltf) => {
+      const sunObj = gltf.scene;
+      sunObj.scale.setScalar(0.8);
+      sunRef.current = sunObj;
+      scene.add(sunObj);
+    });
+
+    return () => {
+      if (orbitLineRef.current) scene.remove(orbitLineRef.current);
+      if (lvlhAxesRef.current) scene.remove(lvlhAxesRef.current);
+      if (bodyAxesRef.current) scene.remove(bodyAxesRef.current);
+      if (satelliteRef.current) scene.remove(satelliteRef.current);
+      if (sunRef.current) scene.remove(sunRef.current);
     };
-  }, [sunVector]);
+  }, [orbitRadius]);
 
-  const satellite = useMemo<OrbitSatelliteData>(() => {
-    if (!orbitData || !orbitParams) {
-      return {
-        lat: 0,
-        lng: 0,
-        alt: 0,
-        yawRad: 0,
-        panelAngleRad: 0,
-        nuRad: 0,
-      };
+  const fetchTrajectory = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const { sun_x, sun_y, sun_z } = getSunECI();
+      const r_m = orbitRadius * 1000;
+
+      const response = await fetch('http://localhost:8000/orbit/trajectory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          r_m,
+          nu_initial_rad: 0,
+          sun_x,
+          sun_y,
+          sun_z,
+          n_points: 361,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data: TrajectoryResponse = await response.json();
+      setTrajectoryData(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }, [getSunECI, orbitRadius]);
+
+  useEffect(() => {
+    const t = setTimeout(() => void fetchTrajectory(), 300);
+    return () => clearTimeout(t);
+  }, [fetchTrajectory]);
+
+  useEffect(() => {
+    if (!trajectoryData) return;
+
+    const nuRad = deg2rad(nu);
+    const nuArr = trajectoryData.yaw_steering.nu_rad;
+
+    let bestIdx = 0;
+    let bestDist = Math.abs(nuArr[0] - nuRad);
+    for (let i = 1; i < nuArr.length; i++) {
+      const dist = Math.abs(nuArr[i] - nuRad);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
     }
 
-    const yawOffsetRad = (yawOffsetDeg * Math.PI) / 180;
-    const panelOffsetRad = (panelOffsetDeg * Math.PI) / 180;
+    const yaw_rad = trajectoryData.yaw_steering.yaw_rad[bestIdx];
+    const yaw_deg = trajectoryData.yaw_steering.yaw_deg[bestIdx];
+    const beta_rad = trajectoryData.yaw_steering.beta_rad[bestIdx];
+    const beta_deg = trajectoryData.yaw_steering.beta_deg[bestIdx];
+    const panel_angle_rad = trajectoryData.yaw_steering.panel_angle_rad[bestIdx];
+    const panel_angle_deg = trajectoryData.yaw_steering.panel_angle_deg[bestIdx];
 
-    const { t_s, nu_rad } = orbitData.yaw_steering;
-    const alphaRad = Math.atan2(sunVector[1], sunVector[0]);
+    const { sun_x, sun_y, sun_z } = getSunECI();
 
-    const period = orbitData.orbit_params.period_s;
-    const t = period > 0 ? ((tOrbitS % period) + period) % period : tOrbitS;
+    const sin_nu = Math.sin(nuRad);
+    const cos_nu = Math.cos(nuRad);
 
-    let nuRad = 0;
-    let yawRad = 0;
-    let panelAngleRad = 0;
-    if (manualNuEnabled) {
-      // User convention: 0° (or 360°) is facing the Sun (Noon)
-      // and increases clockwise when viewed from the North pole.
-      // In ECI, true anomaly ν increases counter-clockwise, so we map:
-      // θ = alpha - ν  (clockwise-from-Sun)
-      // => ν = alpha - θ
-      const thetaRad = (manualNuDeg * Math.PI) / 180;
-      const targetNu = Math.atan2(Math.sin(alphaRad - thetaRad), Math.cos(alphaRad - thetaRad));
-      let bestIdx = 0;
-      let bestErr = Number.POSITIVE_INFINITY;
-      for (let i = 0; i < nu_rad.length; i++) {
-        const d = Math.atan2(Math.sin(nu_rad[i] - targetNu), Math.cos(nu_rad[i] - targetNu));
-        const err = Math.abs(d);
-        if (err < bestErr) {
-          bestErr = err;
-          bestIdx = i;
+    const sx_local = -sun_x * sin_nu + sun_y * cos_nu;
+    const sy_local = -sun_z;
+    const sz_local = -sun_x * cos_nu - sun_y * sin_nu;
+
+    const c = Math.cos(yaw_rad);
+    const s = Math.sin(yaw_rad);
+    const s_bx = c * sx_local + s * sy_local;
+    const s_by = -s * sx_local + c * sy_local;
+    const s_bz = sz_local;
+
+    setInterpolatedData({
+      yaw_rad,
+      yaw_deg,
+      beta_rad,
+      beta_deg,
+      panel_angle_rad,
+      panel_angle_deg,
+      sun_body: [s_bx, s_by, s_bz],
+    });
+  }, [trajectoryData, nu, deg2rad, getSunECI]);
+
+  useEffect(() => {
+    const globe = globeRef.current;
+    if (!globe) return;
+
+    const worldScale = GLOBE_RADIUS / R_EARTH_M;
+    const nuRad = deg2rad(nu);
+    const r_m = orbitRadius * 1000;
+
+    const posThree = new THREE.Vector3(r_m * Math.cos(nuRad), 0, r_m * Math.sin(nuRad)).multiplyScalar(worldScale);
+    const velDir = new THREE.Vector3(-Math.sin(nuRad), 0, Math.cos(nuRad)).normalize();
+
+    const sunDir = getSunDirThreeJS();
+    if (sunRef.current) {
+      sunRef.current.position.copy(sunDir.clone().multiplyScalar(20000 * 1000 * worldScale));
+    }
+
+    if (satelliteRef.current) {
+      satelliteRef.current.position.copy(posThree);
+    }
+
+    const rHat = posThree.clone().normalize();
+    const zLVLH = rHat.clone().multiplyScalar(-1);
+    const xLVLH = velDir.clone();
+    const yLVLH = new THREE.Vector3().crossVectors(zLVLH, xLVLH).normalize();
+
+    if (lvlhAxesRef.current) {
+      lvlhAxesRef.current.clear();
+      lvlhAxesRef.current.position.copy(posThree);
+      if (showAxes) {
+        const len = 3000 * 1000 * worldScale;
+        lvlhAxesRef.current.add(new THREE.ArrowHelper(xLVLH, new THREE.Vector3(), len, 0xff0000, len * 0.2, len * 0.13));
+        lvlhAxesRef.current.add(new THREE.ArrowHelper(yLVLH, new THREE.Vector3(), len, 0x00ff00, len * 0.2, len * 0.13));
+        lvlhAxesRef.current.add(new THREE.ArrowHelper(zLVLH, new THREE.Vector3(), len, 0x0000ff, len * 0.2, len * 0.13));
+        lvlhAxesRef.current.visible = true;
+      } else {
+        lvlhAxesRef.current.visible = false;
+      }
+    }
+
+    if (interpolatedData && satelliteRef.current) {
+      const yawRad = interpolatedData.yaw_rad;
+      const panelAngleRad = interpolatedData.panel_angle_rad;
+
+      const cosPsi = Math.cos(yawRad);
+      const sinPsi = Math.sin(yawRad);
+
+      const xBody = xLVLH.clone().multiplyScalar(cosPsi).add(yLVLH.clone().multiplyScalar(sinPsi)).normalize();
+      const yBody = xLVLH.clone().multiplyScalar(-sinPsi).add(yLVLH.clone().multiplyScalar(cosPsi)).normalize();
+      const zBody = zLVLH.clone();
+
+      if (bodyAxesRef.current) {
+        bodyAxesRef.current.clear();
+        bodyAxesRef.current.position.copy(posThree);
+        if (showAxes) {
+          const len = 3500 * 1000 * worldScale;
+          bodyAxesRef.current.add(new THREE.ArrowHelper(xBody, new THREE.Vector3(), len, 0x00ffff, len * 0.2, len * 0.13));
+          bodyAxesRef.current.add(new THREE.ArrowHelper(yBody, new THREE.Vector3(), len, 0xff00ff, len * 0.2, len * 0.13));
+          bodyAxesRef.current.add(new THREE.ArrowHelper(zBody, new THREE.Vector3(), len, 0xffffff, len * 0.2, len * 0.13));
+          bodyAxesRef.current.visible = true;
+        } else {
+          bodyAxesRef.current.visible = false;
         }
       }
 
-      nuRad = nu_rad[bestIdx] ?? targetNu;
-      yawRad = orbitData.yaw_steering.yaw_rad[bestIdx] ?? 0;
-      panelAngleRad = orbitData.yaw_steering.panel_angle_rad
-        ? orbitData.yaw_steering.panel_angle_rad[bestIdx] ?? 0
-        : 0;
-    } else {
-      nuRad = interpolateValue(t_s, nu_rad, t);
-      yawRad = interpolateAngle(t_s, orbitData.yaw_steering.yaw_rad, t);
-      panelAngleRad = orbitData.yaw_steering.panel_angle_rad
-        ? interpolateAngle(t_s, orbitData.yaw_steering.panel_angle_rad, t)
-        : 0;
+      const rotMatrix = new THREE.Matrix4().makeBasis(xBody, yBody, zBody);
+      const bodyQuat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
+      if (satelliteBaseQuatRef.current) {
+        satelliteRef.current.quaternion.copy(bodyQuat).multiply(satelliteBaseQuatRef.current);
+      } else {
+        satelliteRef.current.quaternion.copy(bodyQuat);
+      }
+
+      if (solarPanelsRef.current && solarPanelsBaseQuatRef.current) {
+        const panelAxis = new THREE.Vector3(1, 0, 0);
+        const panelQuat = new THREE.Quaternion().setFromAxisAngle(panelAxis, panelAngleRad);
+        solarPanelsRef.current.quaternion.copy(solarPanelsBaseQuatRef.current).multiply(panelQuat);
+      }
+    } else if (satelliteRef.current) {
+      const rotMatrix = new THREE.Matrix4().makeBasis(xLVLH, yLVLH, zLVLH);
+      const defaultQuat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
+      if (satelliteBaseQuatRef.current) {
+        satelliteRef.current.quaternion.copy(defaultQuat).multiply(satelliteBaseQuatRef.current);
+      } else {
+        satelliteRef.current.quaternion.copy(defaultQuat);
+      }
     }
 
-    // Calculate lat/lng/alt from nuRad for display purposes
-    const r = orbitParams.r_m;
-    const x = r * Math.cos(nuRad);
-    const y = r * Math.sin(nuRad);
-    const z = 0; // Equatorial orbit
-    const { lat, lng, alt } = eciToLatLngAlt({ x, y, z });
+    if (rafIdRef.current === null) {
+      const animate = () => {
+        rafIdRef.current = requestAnimationFrame(animate);
+      };
+      animate();
+    }
+  }, [nu, interpolatedData, showAxes, getSunDirThreeJS, deg2rad, orbitRadius]);
 
-    yawRad = Math.atan2(Math.sin(yawRad + yawOffsetRad), Math.cos(yawRad + yawOffsetRad));
-    panelAngleRad = Math.atan2(
-      Math.sin(panelAngleRad + panelOffsetRad),
-      Math.cos(panelAngleRad + panelOffsetRad)
-    );
-
-    return {
-      lat,
-      lng,
-      alt,
-      yawRad,
-      panelAngleRad,
-      nuRad,
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
     };
-  }, [orbitData, orbitParams, tOrbitS, manualNuEnabled, manualNuDeg, yawOffsetDeg, panelOffsetDeg, sunVector]);
-
-  const handleGlobeClick = useCallback(
-    (coords: { lat: number; lng: number }) => {
-      const newSun = latLngToEciUnit(coords.lat, coords.lng);
-      setSunVector(newSun);
-      void fetchOrbitTrajectory();
-    },
-    [setSunVector, fetchOrbitTrajectory]
-  );
-
-  if (currentScene !== 'orbit') return null;
+  }, []);
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#000' }}>
-      {orbitError && (
-        <div
+    <div style={{ width: '100vw', height: '100vh', display: 'flex' }}>
+      <div ref={globeContainerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <Globe
+          ref={globeRef}
+          backgroundColor="#000000"
+          globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+          bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
+          backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
+          width={globeSize.width}
+          height={globeSize.height}
+        />
+      </div>
+
+      <div
+        style={{
+          width: '380px',
+          background: 'linear-gradient(180deg, #1a1a2e 0%, #0f0f1e 100%)',
+          color: '#fff',
+          padding: '20px',
+          overflowY: 'auto',
+          fontFamily: "'Inter', sans-serif",
+          borderLeft: '1px solid rgba(255,255,255,0.1)',
+        }}
+      >
+        <h1 style={{ fontSize: '22px', marginBottom: '5px', color: '#00d9ff' }}>
+          🛰️ Yaw Steering Lab
+        </h1>
+        <p style={{ fontSize: '11px', color: '#666', marginBottom: '20px' }}>
+          Uses /orbit/trajectory for smooth yaw
+        </p>
+
+        <section style={{ marginBottom: '25px' }}>
+          <h2 style={{ fontSize: '14px', marginBottom: '12px', color: '#ffd700' }}>📍 Orbit Position</h2>
+          <label style={{ display: 'block', marginBottom: '15px' }}>
+            <span style={{ fontSize: '12px', color: '#aaa' }}>
+              True Anomaly (ν): <strong>{nu}°</strong>
+            </span>
+            <input
+              type="range"
+              min="0"
+              max="360"
+              step="1"
+              value={nu}
+              onChange={(e) => setNu(Number(e.target.value))}
+              style={{ width: '100%', marginTop: '5px' }}
+            />
+          </label>
+        </section>
+
+        <section style={{ marginBottom: '25px' }}>
+          <h2 style={{ fontSize: '14px', marginBottom: '12px', color: '#ffd700' }}>☀️ Sun Position</h2>
+          <label style={{ display: 'block', marginBottom: '10px' }}>
+            <span style={{ fontSize: '12px', color: '#aaa' }}>
+              Azimuth: <strong>{sunAzimuth}°</strong> (in orbit plane)
+            </span>
+            <input
+              type="range"
+              min="0"
+              max="360"
+              step="5"
+              value={sunAzimuth}
+              onChange={(e) => setSunAzimuth(Number(e.target.value))}
+              style={{ width: '100%', marginTop: '5px' }}
+            />
+          </label>
+          <label style={{ display: 'block' }}>
+            <span style={{ fontSize: '12px', color: '#aaa' }}>
+              Elevation: <strong>{sunElevation}°</strong> (above orbit plane)
+            </span>
+            <input
+              type="range"
+              min="-90"
+              max="90"
+              step="5"
+              value={sunElevation}
+              onChange={(e) => setSunElevation(Number(e.target.value))}
+              style={{ width: '100%', marginTop: '5px' }}
+            />
+            <div style={{ fontSize: '10px', color: '#666', marginTop: '3px' }}>
+              0° = in plane, ±90° = poles. Non-zero for yaw variation!
+            </div>
+          </label>
+        </section>
+
+        <section style={{ marginBottom: '25px' }}>
+          <label style={{ display: 'flex', alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={showAxes}
+              onChange={(e) => setShowAxes(e.target.checked)}
+              style={{ marginRight: '10px' }}
+            />
+            <span style={{ fontSize: '13px' }}>Show Coordinate Axes</span>
+          </label>
+        </section>
+
+        <section
           style={{
-            position: 'absolute',
-            top: 20,
-            left: 20,
-            zIndex: 10,
-            padding: '10px 12px',
-            borderRadius: 6,
-            background: 'rgba(200, 40, 40, 0.25)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: '#fff',
-            fontFamily: "'Roboto Mono', monospace",
-            fontSize: 12,
+            background: 'rgba(0,0,0,0.4)',
+            borderRadius: '10px',
+            padding: '15px',
+            marginBottom: '20px',
           }}
         >
-          {orbitError}
-        </div>
-      )}
+          <h2 style={{ fontSize: '14px', marginBottom: '15px', color: '#00d9ff' }}>
+            📊 Backend Calculations
+          </h2>
 
-      {orbitLoading && !orbitData && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 20,
-            left: 20,
-            zIndex: 10,
-            padding: '10px 12px',
-            borderRadius: 6,
-            background: 'rgba(0,0,0,0.35)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: '#fff',
-            fontFamily: "'Roboto Mono', monospace",
-            fontSize: 12,
-          }}
-        >
-          LOADING ORBIT...
-        </div>
-      )}
+          {loading && <p style={{ color: '#888' }}>Loading trajectory...</p>}
+          {error && <p style={{ color: '#ff6b6b' }}>Error: {error}</p>}
 
-      {orbitData && (
-        <>
-          <OrbitGlobe
-            orbitPath={orbitPath}
-            satellite={satellite}
-            orbitRadius={orbitParams?.r_m || R_EARTH + 200000}
-            sun={sun}
-            sunVectorEci={sunVector}
-            onGlobeClick={handleGlobeClick}
-          />
-
-          <div
-            style={{
-              position: 'absolute',
-              top: 20,
-              right: 20,
-              zIndex: 1001,
-              padding: '10px 12px',
-              borderRadius: 8,
-              background: 'rgba(0,0,0,0.55)',
-              border: '1px solid rgba(255,255,255,0.15)',
-              color: '#fff',
-              fontFamily: "'Roboto Mono', monospace",
-              fontSize: 11,
-              pointerEvents: 'auto',
-              width: 260,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-              <div style={{ fontWeight: 700 }}>Manual θ</div>
-              <input
-                type="checkbox"
-                checked={manualNuEnabled}
-                onChange={(e) => setManualNuEnabled(e.target.checked)}
-              />
-            </div>
-
-            <div style={{ marginTop: 8, opacity: manualNuEnabled ? 1 : 0.5 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <div>θ</div>
-                <div>{manualNuDeg.toFixed(0)}°</div>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={360}
-                step={1}
-                value={manualNuDeg}
-                onChange={(e) => setManualNuDeg(Number(e.target.value))}
-                disabled={!manualNuEnabled}
-                style={{ width: '100%' }}
-              />
-            </div>
-
-            <div style={{ marginTop: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <div>Yaw offset</div>
-                <div>{yawOffsetDeg.toFixed(0)}°</div>
-              </div>
-              <input
-                type="range"
-                min={-180}
-                max={180}
-                step={1}
-                value={yawOffsetDeg}
-                onChange={(e) => setYawOffsetDeg(Number(e.target.value))}
-                style={{ width: '100%' }}
-              />
-            </div>
-
-            <div style={{ marginTop: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <div>Panel offset</div>
-                <div>{panelOffsetDeg.toFixed(0)}°</div>
-              </div>
-              <input
-                type="range"
-                min={-180}
-                max={180}
-                step={1}
-                value={panelOffsetDeg}
-                onChange={(e) => setPanelOffsetDeg(Number(e.target.value))}
-                style={{ width: '100%' }}
-              />
-            </div>
-          </div>
-
-          {/* Metrics Overlay */}
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '40px',
-              right: '40px',
-              width: '320px',
-              background: 'linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(15, 15, 30, 0.95) 100%)',
-              color: '#fff',
-              padding: '20px',
-              borderRadius: '16px',
-              border: '1px solid rgba(0, 217, 255, 0.3)',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
-              fontFamily: "'Inter', sans-serif",
-              backdropFilter: 'blur(10px)',
-              pointerEvents: 'none',
-              zIndex: 1000,
-            }}
-          >
-            <h2 style={{ fontSize: '16px', marginBottom: '15px', color: '#00d9ff', borderBottom: '1px solid rgba(0,217,255,0.2)', paddingBottom: '8px' }}>
-              📡 Yaw Steering Metrics
-            </h2>
-
-            <div style={{ display: 'grid', gap: '10px' }}>
-              {/* ORBIT POSITION */}
-              {(() => {
-                // Use nuRad directly from satellite state
-                const nuDeg = ((satellite.nuRad * 180 / Math.PI) % 360 + 360) % 360;
-                
-                const alphaRad = Math.atan2(sunVector[1], sunVector[0]);
-                const alphaDeg = ((alphaRad * 180 / Math.PI) % 360 + 360) % 360;
-                
-                // θ = α - ν (measured from Sun / Noon, clockwise from North pole)
-                let thetaDeg = alphaDeg - nuDeg;
-                thetaDeg = ((thetaDeg % 360) + 360) % 360;
-                
-                return (
-                  <div style={{ padding: '10px', background: 'rgba(255,140,0,0.15)', borderRadius: '8px', marginBottom: '5px' }}>
-                    <div style={{ fontSize: '10px', color: '#ff8c00', fontWeight: 'bold', textTransform: 'uppercase' }}>📍 Orbit Position</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '5px' }}>
-                      <div>
-                        <div style={{ fontSize: '9px', color: '#aaa' }}>θ from Sun (clockwise)</div>
-                        <div style={{ fontSize: '16px', fontWeight: '600' }}>{thetaDeg.toFixed(1)}°</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '9px', color: '#aaa' }}>True Anomaly (ν)</div>
-                        <div style={{ fontSize: '16px', fontWeight: '600' }}>{nuDeg.toFixed(1)}°</div>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: '9px', color: '#888', marginTop: '5px' }}>
-                      Sun Azimuth (α): {alphaDeg.toFixed(1)}°
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* YAW */}
-              <div style={{ padding: '10px', background: 'rgba(0,217,255,0.1)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '10px', color: '#00d9ff', fontWeight: 'bold', textTransform: 'uppercase' }}>Yaw (ψ)</div>
-                <div style={{ fontSize: '20px', fontWeight: '600' }}>
-                  {(satellite.yawRad * 180 / Math.PI).toFixed(2)}°
+          {interpolatedData && (
+            <div style={{ fontFamily: 'monospace', fontSize: '12px', lineHeight: '1.8' }}>
+              <div style={{ marginBottom: '12px', padding: '10px', background: 'rgba(0,217,255,0.1)', borderRadius: '6px' }}>
+                <div style={{ color: '#00d9ff', fontWeight: 'bold', marginBottom: '4px' }}>
+                  🔄 YAW (ψ) - Rotates ENTIRE satellite
+                </div>
+                <div style={{ fontSize: '18px', color: '#fff' }}>
+                  {interpolatedData.yaw_deg.toFixed(2)}°
+                </div>
+                <div style={{ fontSize: '10px', color: '#888' }}>
+                  {interpolatedData.yaw_rad.toFixed(4)} rad
                 </div>
               </div>
 
-              {/* BETA */}
-              <div style={{ padding: '10px', background: 'rgba(255,215,0,0.1)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '10px', color: '#ffd700', fontWeight: 'bold', textTransform: 'uppercase' }}>Beta (β)</div>
-                <div style={{ fontSize: '20px', fontWeight: '600' }}>
-                  {(Math.asin(sunVector[2]) * 180 / Math.PI).toFixed(2)}°
+              <div style={{ marginBottom: '12px', padding: '10px', background: 'rgba(255,215,0,0.1)', borderRadius: '6px' }}>
+                <div style={{ color: '#ffd700', fontWeight: 'bold', marginBottom: '4px' }}>
+                  📐 BETA (β) - Sun elevation
+                </div>
+                <div style={{ fontSize: '18px', color: '#fff' }}>
+                  {interpolatedData.beta_deg.toFixed(2)}°
+                </div>
+                <div style={{ fontSize: '10px', color: '#888' }}>
+                  = sun elevation slider value
                 </div>
               </div>
 
-              {/* PANEL ANGLE */}
-              <div style={{ padding: '10px', background: 'rgba(0,255,0,0.1)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '10px', color: '#00ff00', fontWeight: 'bold', textTransform: 'uppercase' }}>Panel (φ)</div>
-                <div style={{ fontSize: '20px', fontWeight: '600' }}>
-                  {(satellite.panelAngleRad * 180 / Math.PI).toFixed(2)}°
+              <div style={{ marginBottom: '12px', padding: '10px', background: 'rgba(0,255,0,0.1)', borderRadius: '6px' }}>
+                <div style={{ color: '#00ff00', fontWeight: 'bold', marginBottom: '4px' }}>
+                  ⚡ PANEL (φ) - Rotates ONLY panels
+                </div>
+                <div style={{ fontSize: '18px', color: '#fff' }}>
+                  {interpolatedData.panel_angle_deg.toFixed(2)}°
+                </div>
+              </div>
+
+              <div style={{ padding: '10px', background: 'rgba(255,165,0,0.1)', borderRadius: '6px' }}>
+                <div style={{ color: '#ffa500', fontWeight: 'bold', marginBottom: '4px' }}>
+                  ☀️ Sun Vector (Body Frame)
+                </div>
+                <div style={{ fontSize: '12px', color: '#fff' }}>
+                  X: {interpolatedData.sun_body[0].toFixed(4)}<br />
+                  Y: {interpolatedData.sun_body[1].toFixed(4)}<br />
+                  Z: {interpolatedData.sun_body[2].toFixed(4)}
                 </div>
               </div>
             </div>
+          )}
+        </section>
 
-            <div style={{ marginTop: '15px', fontSize: '10px', color: '#888', textAlign: 'center' }}>
-              Status: NOMINAL • US2007 Standard
-            </div>
+        <section>
+          <h2 style={{ fontSize: '12px', marginBottom: '10px', color: '#888' }}>Axis Legend</h2>
+          <div style={{ fontSize: '11px', lineHeight: '1.6', color: '#aaa' }}>
+            <p><span style={{ color: '#ff0000' }}>■</span> LVLH X (Velocity)</p>
+            <p><span style={{ color: '#00ff00' }}>■</span> LVLH Y (South)</p>
+            <p><span style={{ color: '#0000ff' }}>■</span> LVLH Z (Nadir)</p>
+            <p><span style={{ color: '#00ffff' }}>■</span> Body X (after yaw)</p>
+            <p><span style={{ color: '#ff00ff' }}>■</span> Body Y (SADA axis)</p>
+            <p><span style={{ color: '#ffffff' }}>■</span> Body Z (Nadir)</p>
           </div>
-
-          {/* Legend */}
-          <div
-             style={{
-              position: 'absolute',
-              bottom: '40px',
-              left: '40px',
-              padding: '15px',
-              background: 'rgba(0,0,0,0.6)',
-              borderRadius: '12px',
-              color: '#aaa',
-              fontSize: '11px',
-              fontFamily: 'monospace',
-              border: '1px solid rgba(255,255,255,0.1)',
-              pointerEvents: 'none'
-            }}
-          >
-            <div style={{ marginBottom: '5px', color: '#fff', fontWeight: 'bold' }}>CONVENTIONS</div>
-            <div>θ = 0° facing Sun (Noon)</div>
-            <div>θ increases clockwise (viewed from North pole)</div>
-          </div>
-        </>
-      )}
+        </section>
+      </div>
     </div>
   );
 }

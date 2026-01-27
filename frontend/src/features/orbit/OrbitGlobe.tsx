@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import Globe from 'react-globe.gl';
 import type { GlobeMethods } from 'react-globe.gl';
-import { Group, Object3D, Vector3, DirectionalLight, AmbientLight } from 'three';
+import { Group, Object3D, Vector3, DirectionalLight, AmbientLight, ArrowHelper } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createSatelliteController } from './SatelliteModel';
 
@@ -42,6 +42,7 @@ interface OrbitGlobeProps {
   sun: { lat: number; lng: number; alt: number };
   sunVectorEci: [number, number, number];
   onGlobeClick: (coords: { lat: number; lng: number }) => void;
+  showAxes?: boolean;
 }
 
 const sunLoader = new GLTFLoader();
@@ -63,9 +64,10 @@ async function loadSunScene(modelUrl: string): Promise<Object3D> {
 const R_EARTH = 6378137;
 const GLOBE_RADIUS = 100; // react-globe.gl default
 
-export function OrbitGlobe({ orbitPath, satellite, orbitRadius, sun, sunVectorEci, onGlobeClick }: OrbitGlobeProps) {
+export function OrbitGlobe({ orbitPath, satellite, orbitRadius, sun, sunVectorEci, onGlobeClick, showAxes }: OrbitGlobeProps) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const controller = useMemo(() => createSatelliteController('/models/satellite_replace.glb'), []);
+  const axesRef = useRef<Group | null>(null);
   
   const sunObject = useMemo(() => {
     const root = new Group();
@@ -86,8 +88,14 @@ export function OrbitGlobe({ orbitPath, satellite, orbitRadius, sun, sunVectorEc
     const scene = globe.scene();
     scene.add(controller.object);
 
+    const axes = new Group();
+    axesRef.current = axes;
+    scene.add(axes);
+
     return () => {
       scene.remove(controller.object);
+      scene.remove(axes);
+      axesRef.current = null;
     };
   }, [controller]);
 
@@ -101,23 +109,12 @@ export function OrbitGlobe({ orbitPath, satellite, orbitRadius, sun, sunVectorEc
     // POSITION & VELOCITY - FIXED FOR GLOBE.GL COORDINATE SYSTEM
     // ========================================================================
     
-    // Globe.gl has a mirrored Z axis compared to our lab
-    // To go EAST (prograde), we negate Z:
-    // - Position: [r*cos(nu), 0, -r*sin(nu)]
-    // - Velocity: [-sin(nu), 0, -cos(nu)]
-    
-    const positionGlobe = new Vector3(
-      r * Math.sin(nuRad),
-      0,
-      r * Math.cos(nuRad)
-    );
-    
-    // Velocity tangent (derivative w.r.t. nu)
-    const velocityGlobe = new Vector3(
-      Math.cos(nuRad),
-      0,
-      -Math.sin(nuRad)
-    ).normalize();
+    // Lab convention (Three.js): orbit in XZ plane, Y-up.
+    // Position: [r*cos(nu), 0, r*sin(nu)]
+    // Velocity: [-sin(nu), 0, cos(nu)]
+    // When nu increases 0→360, motion is counter-clockwise viewed from +Y (East/prograde).
+    const positionGlobe = new Vector3(r * Math.cos(nuRad), 0, r * Math.sin(nuRad));
+    const velocityGlobe = new Vector3(-Math.sin(nuRad), 0, Math.cos(nuRad)).normalize();
     
     // Scale position for rendering
     const positionScaled = positionGlobe.clone().multiplyScalar(worldScale);
@@ -135,7 +132,23 @@ export function OrbitGlobe({ orbitPath, satellite, orbitRadius, sun, sunVectorEc
     // Set position
     controller.object.position.copy(positionScaled);
 
-  }, [controller, satellite, orbitRadius]);
+    const axes = axesRef.current;
+    if (axes) {
+      axes.clear();
+      axes.visible = Boolean(showAxes);
+      axes.position.copy(positionScaled);
+
+      if (showAxes) {
+        const len = 18;
+        axes.add(new ArrowHelper(velocityGlobe.clone().normalize(), new Vector3(), len, 0xff0000, 3, 2));
+        const zLVLH = positionGlobe.clone().normalize().multiplyScalar(-1);
+        const yLVLH = new Vector3().crossVectors(zLVLH, velocityGlobe).normalize();
+        axes.add(new ArrowHelper(yLVLH, new Vector3(), len, 0x00ff00, 3, 2));
+        axes.add(new ArrowHelper(zLVLH, new Vector3(), len, 0x0000ff, 3, 2));
+      }
+    }
+
+  }, [controller, satellite, orbitRadius, showAxes]);
 
   // Lighting Update
   useEffect(() => {
