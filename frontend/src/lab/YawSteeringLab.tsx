@@ -48,6 +48,8 @@ interface InterpolatedData {
   sun_body: [number, number, number];
 }
 
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
+
 export default function YawSteeringLab() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -225,7 +227,7 @@ export default function YawSteeringLab() {
       const { sun_x, sun_y, sun_z } = getSunECI();
       const r_m = orbitRadius * 1000;
 
-      const response = await fetch('http://localhost:8000/orbit/trajectory', {
+      const response = await fetch(`${API_BASE_URL}/orbit/trajectory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -234,7 +236,7 @@ export default function YawSteeringLab() {
           sun_x,
           sun_y,
           sun_z,
-          n_points: 361, // 1 point per degree
+          n_points: 361,
         }),
       });
 

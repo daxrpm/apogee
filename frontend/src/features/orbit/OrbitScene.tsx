@@ -41,6 +41,7 @@ interface InterpolatedData {
 const R_EARTH_M = 6378137;
 const GLOBE_RADIUS = 100;
 const ANIMATION_TIME_SCALE = 40;
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
 export function OrbitScene() {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
@@ -200,7 +201,7 @@ export function OrbitScene() {
       const { sun_x, sun_y, sun_z } = getSunECI();
       const r_m = orbitParams?.r_m ?? orbitRadius * 1000;
 
-      const response = await fetch('http://localhost:8000/orbit/trajectory', {
+      const response = await fetch(`${API_BASE_URL}/orbit/trajectory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
