@@ -3,6 +3,7 @@ import Globe from 'react-globe.gl';
 import type { GlobeMethods } from 'react-globe.gl';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { useSimulationStore } from '../../stores/simulationStore';
 
 interface TrajectoryResponse {
   orbit_params: {
@@ -39,11 +40,15 @@ interface InterpolatedData {
 
 const R_EARTH_M = 6378137;
 const GLOBE_RADIUS = 100;
+const ANIMATION_TIME_SCALE = 50;
 
 export function OrbitScene() {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const globeContainerRef = useRef<HTMLDivElement | null>(null);
   const rafIdRef = useRef<number | null>(null);
+  const lastAnimTRef = useRef<number | null>(null);
+
+  const satelliteScaleFactorRef = useRef<number>(40);
 
   const [globeSize, setGlobeSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
@@ -57,7 +62,11 @@ export function OrbitScene() {
   const bodyAxesRef = useRef<THREE.Group | null>(null);
   const orbitLineRef = useRef<THREE.Line | null>(null);
 
-  const [nu, setNu] = useState(0);
+  const { orbitParams } = useSimulationStore();
+
+  const [nu, setNu] = useState(360);
+  const [manualNu, setManualNu] = useState(false);
+  const [satelliteScaleFactor, setSatelliteScaleFactor] = useState(40);
   const [sunAzimuth, setSunAzimuth] = useState(0);
   const [sunElevation, setSunElevation] = useState(20);
   const [orbitRadius] = useState(6571);
@@ -106,6 +115,10 @@ export function OrbitScene() {
   }, [getSunECI]);
 
   useEffect(() => {
+    satelliteScaleFactorRef.current = satelliteScaleFactor;
+  }, [satelliteScaleFactor]);
+
+  useEffect(() => {
     const globe = globeRef.current;
     if (!globe) return;
 
@@ -124,7 +137,7 @@ export function OrbitScene() {
     scene.add(bodyAxes);
 
     const worldScale = GLOBE_RADIUS / R_EARTH_M;
-    const r_m = orbitRadius * 1000;
+    const r_m = orbitParams?.r_m ?? orbitRadius * 1000;
 
     const orbitPoints: THREE.Vector3[] = [];
     for (let i = 0; i <= 360; i++) {
@@ -142,7 +155,7 @@ export function OrbitScene() {
 
     loader.load('/models/satellite_replace.glb', (gltf) => {
       const satellite = gltf.scene;
-      satellite.scale.setScalar(300 * worldScale * 1000);
+      satellite.scale.setScalar(satelliteScaleFactorRef.current * worldScale * 1000);
 
       const baseRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
       satelliteBaseQuatRef.current = baseRotation;
@@ -171,7 +184,13 @@ export function OrbitScene() {
       if (satelliteRef.current) scene.remove(satelliteRef.current);
       if (sunRef.current) scene.remove(sunRef.current);
     };
-  }, [orbitRadius]);
+  }, [orbitParams, orbitRadius]);
+
+  useEffect(() => {
+    if (!satelliteRef.current) return;
+    const worldScale = GLOBE_RADIUS / R_EARTH_M;
+    satelliteRef.current.scale.setScalar(satelliteScaleFactor * worldScale * 1000);
+  }, [satelliteScaleFactor]);
 
   const fetchTrajectory = useCallback(async () => {
     setLoading(true);
@@ -179,7 +198,7 @@ export function OrbitScene() {
 
     try {
       const { sun_x, sun_y, sun_z } = getSunECI();
-      const r_m = orbitRadius * 1000;
+      const r_m = orbitParams?.r_m ?? orbitRadius * 1000;
 
       const response = await fetch('http://localhost:8000/orbit/trajectory', {
         method: 'POST',
@@ -202,12 +221,40 @@ export function OrbitScene() {
     } finally {
       setLoading(false);
     }
-  }, [getSunECI, orbitRadius]);
+  }, [getSunECI, orbitParams, orbitRadius]);
 
   useEffect(() => {
     const t = setTimeout(() => void fetchTrajectory(), 300);
     return () => clearTimeout(t);
   }, [fetchTrajectory]);
+
+  useEffect(() => {
+    if (manualNu) {
+      lastAnimTRef.current = null;
+      return;
+    }
+    if (!trajectoryData) return;
+
+    const omegaRadS = trajectoryData.orbit_params.mean_motion_rad_s;
+    const omegaDegS = (omegaRadS * 180) / Math.PI;
+
+    let raf = 0;
+    const step = (t: number) => {
+      const last = lastAnimTRef.current;
+      lastAnimTRef.current = t;
+      if (last !== null) {
+        const dt = (t - last) / 1000;
+        setNu((prev) => {
+          const next = prev - omegaDegS * dt * ANIMATION_TIME_SCALE;
+          return ((next % 360) + 360) % 360;
+        });
+      }
+      raf = requestAnimationFrame(step);
+    };
+
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [manualNu, trajectoryData]);
 
   useEffect(() => {
     if (!trajectoryData) return;
@@ -263,8 +310,9 @@ export function OrbitScene() {
     if (!globe) return;
 
     const worldScale = GLOBE_RADIUS / R_EARTH_M;
+    const axisLen = satelliteScaleFactor * worldScale * 1000 * 6;
     const nuRad = deg2rad(nu);
-    const r_m = orbitRadius * 1000;
+    const r_m = orbitParams?.r_m ?? orbitRadius * 1000;
 
     const posThree = new THREE.Vector3(r_m * Math.cos(nuRad), 0, r_m * Math.sin(nuRad)).multiplyScalar(worldScale);
     const velDir = new THREE.Vector3(-Math.sin(nuRad), 0, Math.cos(nuRad)).normalize();
@@ -287,10 +335,10 @@ export function OrbitScene() {
       lvlhAxesRef.current.clear();
       lvlhAxesRef.current.position.copy(posThree);
       if (showAxes) {
-        const len = 3000 * 1000 * worldScale;
-        lvlhAxesRef.current.add(new THREE.ArrowHelper(xLVLH, new THREE.Vector3(), len, 0xff0000, len * 0.2, len * 0.13));
-        lvlhAxesRef.current.add(new THREE.ArrowHelper(yLVLH, new THREE.Vector3(), len, 0x00ff00, len * 0.2, len * 0.13));
-        lvlhAxesRef.current.add(new THREE.ArrowHelper(zLVLH, new THREE.Vector3(), len, 0x0000ff, len * 0.2, len * 0.13));
+        const len = axisLen;
+        lvlhAxesRef.current.add(new THREE.ArrowHelper(xLVLH, new THREE.Vector3(), len, 0xff0000, len * 0.25, len * 0.16));
+        lvlhAxesRef.current.add(new THREE.ArrowHelper(yLVLH, new THREE.Vector3(), len, 0x00ff00, len * 0.25, len * 0.16));
+        lvlhAxesRef.current.add(new THREE.ArrowHelper(zLVLH, new THREE.Vector3(), len, 0x0000ff, len * 0.25, len * 0.16));
         lvlhAxesRef.current.visible = true;
       } else {
         lvlhAxesRef.current.visible = false;
@@ -312,10 +360,10 @@ export function OrbitScene() {
         bodyAxesRef.current.clear();
         bodyAxesRef.current.position.copy(posThree);
         if (showAxes) {
-          const len = 3500 * 1000 * worldScale;
-          bodyAxesRef.current.add(new THREE.ArrowHelper(xBody, new THREE.Vector3(), len, 0x00ffff, len * 0.2, len * 0.13));
-          bodyAxesRef.current.add(new THREE.ArrowHelper(yBody, new THREE.Vector3(), len, 0xff00ff, len * 0.2, len * 0.13));
-          bodyAxesRef.current.add(new THREE.ArrowHelper(zBody, new THREE.Vector3(), len, 0xffffff, len * 0.2, len * 0.13));
+          const len = axisLen;
+          bodyAxesRef.current.add(new THREE.ArrowHelper(xBody, new THREE.Vector3(), len, 0x00ffff, len * 0.25, len * 0.16));
+          bodyAxesRef.current.add(new THREE.ArrowHelper(yBody, new THREE.Vector3(), len, 0xff00ff, len * 0.25, len * 0.16));
+          bodyAxesRef.current.add(new THREE.ArrowHelper(zBody, new THREE.Vector3(), len, 0xffffff, len * 0.25, len * 0.16));
           bodyAxesRef.current.visible = true;
         } else {
           bodyAxesRef.current.visible = false;
@@ -351,7 +399,7 @@ export function OrbitScene() {
       };
       animate();
     }
-  }, [nu, interpolatedData, showAxes, getSunDirThreeJS, deg2rad, orbitRadius]);
+  }, [nu, interpolatedData, showAxes, getSunDirThreeJS, deg2rad, orbitParams, orbitRadius, satelliteScaleFactor]);
 
   useEffect(() => {
     return () => {
@@ -377,27 +425,43 @@ export function OrbitScene() {
       <div
         style={{
           width: '380px',
-          background: 'linear-gradient(180deg, #1a1a2e 0%, #0f0f1e 100%)',
-          color: '#fff',
-          padding: '20px',
+          background: 'rgba(10, 10, 12, 0.86)',
+          color: 'rgba(255,255,255,0.92)',
+          padding: '18px 18px 22px',
           overflowY: 'auto',
-          fontFamily: "'Inter', sans-serif",
-          borderLeft: '1px solid rgba(255,255,255,0.1)',
+          fontFamily: "system-ui, -apple-system, 'Inter', sans-serif",
+          borderLeft: '1px solid rgba(255,255,255,0.08)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          boxShadow: '0 0 0 1px rgba(255,255,255,0.04), -24px 0 60px rgba(0,0,0,0.55)',
         }}
       >
-        <h1 style={{ fontSize: '22px', marginBottom: '5px', color: '#00d9ff' }}>
-          🛰️ Yaw Steering Lab
-        </h1>
-        <p style={{ fontSize: '11px', color: '#666', marginBottom: '20px' }}>
-          Uses /orbit/trajectory for smooth yaw
-        </p>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px' }}>
+          <h1 style={{ fontSize: '14px', margin: 0, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.88)' }}>
+            Orbital Attitude
+          </h1>
+          <div style={{ fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)' }}>
+            Yaw steering
+          </div>
+        </div>
+        <div style={{ marginTop: '10px', marginBottom: '18px', height: '1px', background: 'linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))' }} />
 
         <section style={{ marginBottom: '25px' }}>
-          <h2 style={{ fontSize: '14px', marginBottom: '12px', color: '#ffd700' }}>📍 Orbit Position</h2>
+          <h2 style={{ fontSize: '12px', marginBottom: '10px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.72)' }}>
+            Orbit
+          </h2>
           <label style={{ display: 'block', marginBottom: '15px' }}>
-            <span style={{ fontSize: '12px', color: '#aaa' }}>
-              True Anomaly (ν): <strong>{nu}°</strong>
+            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.70)' }}>
+              True anomaly (ν)
             </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: '2px' }}>
+              <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '18px', color: 'rgba(255,255,255,0.92)' }}>
+                {nu}°
+              </div>
+              <div style={{ fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase', color: manualNu ? 'rgba(255,255,255,0.55)' : 'rgba(0, 217, 255, 0.75)' }}>
+                {manualNu ? 'Manual' : 'Auto'}
+              </div>
+            </div>
             <input
               type="range"
               min="0"
@@ -405,17 +469,59 @@ export function OrbitScene() {
               step="1"
               value={nu}
               onChange={(e) => setNu(Number(e.target.value))}
-              style={{ width: '100%', marginTop: '5px' }}
+              disabled={!manualNu}
+              style={{ width: '100%', marginTop: '8px' }}
+            />
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
+            <input
+              type="checkbox"
+              checked={manualNu}
+              onChange={(e) => setManualNu(e.target.checked)}
+              style={{ marginRight: '10px' }}
+            />
+            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.70)' }}>Manual control</span>
+          </label>
+
+          <label style={{ display: 'block', marginTop: '16px' }}>
+            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.70)' }}>Satellite scale</span>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: '2px' }}>
+              <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '16px', color: 'rgba(255,255,255,0.92)' }}>
+                {satelliteScaleFactor}
+              </div>
+              <div style={{ fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)' }}>
+                factor
+              </div>
+            </div>
+            <input
+              type="range"
+              min="5"
+              max="120"
+              step="1"
+              value={satelliteScaleFactor}
+              onChange={(e) => setSatelliteScaleFactor(Number(e.target.value))}
+              style={{ width: '100%', marginTop: '8px' }}
             />
           </label>
         </section>
 
         <section style={{ marginBottom: '25px' }}>
-          <h2 style={{ fontSize: '14px', marginBottom: '12px', color: '#ffd700' }}>☀️ Sun Position</h2>
+          <h2 style={{ fontSize: '12px', marginBottom: '10px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.72)' }}>
+            Sun
+          </h2>
           <label style={{ display: 'block', marginBottom: '10px' }}>
-            <span style={{ fontSize: '12px', color: '#aaa' }}>
-              Azimuth: <strong>{sunAzimuth}°</strong> (in orbit plane)
+            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.70)' }}>
+              Azimuth
             </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: '2px' }}>
+              <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '16px', color: 'rgba(255,255,255,0.92)' }}>
+                {sunAzimuth}°
+              </div>
+              <div style={{ fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)' }}>
+                Orbit plane
+              </div>
+            </div>
             <input
               type="range"
               min="0"
@@ -423,13 +529,21 @@ export function OrbitScene() {
               step="5"
               value={sunAzimuth}
               onChange={(e) => setSunAzimuth(Number(e.target.value))}
-              style={{ width: '100%', marginTop: '5px' }}
+              style={{ width: '100%', marginTop: '8px' }}
             />
           </label>
           <label style={{ display: 'block' }}>
-            <span style={{ fontSize: '12px', color: '#aaa' }}>
-              Elevation: <strong>{sunElevation}°</strong> (above orbit plane)
+            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.70)' }}>
+              Elevation
             </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: '2px' }}>
+              <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '16px', color: 'rgba(255,255,255,0.92)' }}>
+                {sunElevation}°
+              </div>
+              <div style={{ fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)' }}>
+                Above plane
+              </div>
+            </div>
             <input
               type="range"
               min="-90"
@@ -437,9 +551,9 @@ export function OrbitScene() {
               step="5"
               value={sunElevation}
               onChange={(e) => setSunElevation(Number(e.target.value))}
-              style={{ width: '100%', marginTop: '5px' }}
+              style={{ width: '100%', marginTop: '8px' }}
             />
-            <div style={{ fontSize: '10px', color: '#666', marginTop: '3px' }}>
+            <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginTop: '6px' }}>
               0° = in plane, ±90° = poles. Non-zero for yaw variation!
             </div>
           </label>
@@ -459,62 +573,56 @@ export function OrbitScene() {
 
         <section
           style={{
-            background: 'rgba(0,0,0,0.4)',
-            borderRadius: '10px',
-            padding: '15px',
+            background: 'rgba(255,255,255,0.04)',
+            borderRadius: '12px',
+            padding: '14px',
             marginBottom: '20px',
+            border: '1px solid rgba(255,255,255,0.06)',
           }}
         >
-          <h2 style={{ fontSize: '14px', marginBottom: '15px', color: '#00d9ff' }}>
-            📊 Backend Calculations
+          <h2 style={{ fontSize: '12px', marginBottom: '12px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.72)' }}>
+            Telemetry
           </h2>
 
           {loading && <p style={{ color: '#888' }}>Loading trajectory...</p>}
           {error && <p style={{ color: '#ff6b6b' }}>Error: {error}</p>}
 
           {interpolatedData && (
-            <div style={{ fontFamily: 'monospace', fontSize: '12px', lineHeight: '1.8' }}>
-              <div style={{ marginBottom: '12px', padding: '10px', background: 'rgba(0,217,255,0.1)', borderRadius: '6px' }}>
-                <div style={{ color: '#00d9ff', fontWeight: 'bold', marginBottom: '4px' }}>
-                  🔄 YAW (ψ) - Rotates ENTIRE satellite
+            <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '12px', lineHeight: '1.7' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
+                <div style={{ padding: '12px', background: 'rgba(0,217,255,0.06)', borderRadius: '10px', border: '1px solid rgba(0,217,255,0.12)' }}>
+                  <div style={{ fontSize: '10px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(0,217,255,0.9)', marginBottom: '6px' }}>
+                    Yaw ψ
+                  </div>
+                  <div style={{ fontSize: '22px', color: 'rgba(255,255,255,0.95)' }}>{interpolatedData.yaw_deg.toFixed(2)}°</div>
+                  <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)' }}>{interpolatedData.yaw_rad.toFixed(4)} rad</div>
                 </div>
-                <div style={{ fontSize: '18px', color: '#fff' }}>
-                  {interpolatedData.yaw_deg.toFixed(2)}°
-                </div>
-                <div style={{ fontSize: '10px', color: '#888' }}>
-                  {interpolatedData.yaw_rad.toFixed(4)} rad
-                </div>
-              </div>
 
-              <div style={{ marginBottom: '12px', padding: '10px', background: 'rgba(255,215,0,0.1)', borderRadius: '6px' }}>
-                <div style={{ color: '#ffd700', fontWeight: 'bold', marginBottom: '4px' }}>
-                  📐 BETA (β) - Sun elevation
+                <div style={{ padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ fontSize: '10px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.70)', marginBottom: '6px' }}>
+                    Beta β
+                  </div>
+                  <div style={{ fontSize: '20px', color: 'rgba(255,255,255,0.92)' }}>{interpolatedData.beta_deg.toFixed(2)}°</div>
                 </div>
-                <div style={{ fontSize: '18px', color: '#fff' }}>
-                  {interpolatedData.beta_deg.toFixed(2)}°
-                </div>
-                <div style={{ fontSize: '10px', color: '#888' }}>
-                  = sun elevation slider value
-                </div>
-              </div>
 
-              <div style={{ marginBottom: '12px', padding: '10px', background: 'rgba(0,255,0,0.1)', borderRadius: '6px' }}>
-                <div style={{ color: '#00ff00', fontWeight: 'bold', marginBottom: '4px' }}>
-                  ⚡ PANEL (φ) - Rotates ONLY panels
+                <div style={{ padding: '12px', background: 'rgba(0,255,0,0.05)', borderRadius: '10px', border: '1px solid rgba(0,255,0,0.10)' }}>
+                  <div style={{ fontSize: '10px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(0,255,0,0.85)', marginBottom: '6px' }}>
+                    Panel φ
+                  </div>
+                  <div style={{ fontSize: '20px', color: 'rgba(255,255,255,0.92)' }}>{interpolatedData.panel_angle_deg.toFixed(2)}°</div>
                 </div>
-                <div style={{ fontSize: '18px', color: '#fff' }}>
-                  {interpolatedData.panel_angle_deg.toFixed(2)}°
-                </div>
-              </div>
 
-              <div style={{ padding: '10px', background: 'rgba(255,165,0,0.1)', borderRadius: '6px' }}>
-                <div style={{ color: '#ffa500', fontWeight: 'bold', marginBottom: '4px' }}>
-                  ☀️ Sun Vector (Body Frame)
-                </div>
-                <div style={{ fontSize: '12px', color: '#fff' }}>
-                  X: {interpolatedData.sun_body[0].toFixed(4)}<br />
-                  Y: {interpolatedData.sun_body[1].toFixed(4)}<br />
-                  Z: {interpolatedData.sun_body[2].toFixed(4)}
+                <div style={{ padding: '12px', background: 'rgba(255,165,0,0.05)', borderRadius: '10px', border: '1px solid rgba(255,165,0,0.10)' }}>
+                  <div style={{ fontSize: '10px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,165,0,0.85)', marginBottom: '6px' }}>
+                    Sun vector (body)
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.92)', lineHeight: '1.5' }}>
+                    X {interpolatedData.sun_body[0].toFixed(4)}
+                    <br />
+                    Y {interpolatedData.sun_body[1].toFixed(4)}
+                    <br />
+                    Z {interpolatedData.sun_body[2].toFixed(4)}
+                  </div>
                 </div>
               </div>
             </div>
