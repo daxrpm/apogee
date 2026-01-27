@@ -20,3 +20,4 @@ __pycache__
 *.pyd
 3d_Ecuador_qgis/
 site/
+.env
