@@ -43,65 +43,30 @@ The implementation is designed to be:
 - **Physically accurate**: USSA76 atmosphere, variable mass dynamics, non-constant gravity
 - **Production-ready**: JSON-serializable output, FastAPI backend, modular architecture
 - **Extensible**: Clean separation between physics engine, simulators, and API layers
+## Getting Started
+
+Never used Apogee? Start here.  
+Learn how to install Apogee and run your first simulation.  
+[docs/content/getting-started/index.md](docs/content/getting-started/index.md)
 
 ## Architecture
 
-### Monorepo Structure
+The project follows a monorepo architecture using *uv workspaces* to manage multiple related Python packages in a single repository.  
+Each package is responsible for a specific part of the system (physics engine, launch simulation, orbital mechanics, and API), which improves modularity, maintainability, and code reuse.
 
-Apogee uses a **monorepo with uv workspaces** for dependency management and modular organization:
+The full architecture description is available at:  
+[docs/content/getting-started/architecture.md](docs/content/getting-started/architecture.md)
 
-```text
-apogee/
-├── packages/                    # Python packages (uv workspace)
-│   ├── apogee-physics/         # Pure physics engine (JAX/Diffrax)
-│   │   └── src/apogee_physics/
-│   │       ├── atmosphere.py   # USSA76 atmosphere model
-│   │       ├── dynamics.py     # ODE right-hand side functions
-│   │       ├── simulate.py     # Hybrid simulation with events
-│   │       ├── orbit.py        # Two-body orbital diagnostics
-│   │       ├── shooting.py     # Shooting method solver (LM + Broyden)
-│   │       ├── trajectory.py   # Trajectory data structure
-│   │       ├── types.py        # Type definitions (dataclasses)
-│   │       └── calibration.py  # Vehicle parameter calibration
-│   │
-│   ├── apogee-launch/          # Launch simulator + CLI
-│   │   └── src/apogee_launch/
-│   │       ├── simulator.py    # Public API (solve_to_circular_orbit)
-│   │       ├── falcon9.py      # Falcon 9 v1.2 FT parameters
-│   │       └── cli.py          # Command-line interface (Typer)
-│   │
-│   ├── apogee-orbit/           # Orbital mechanics & yaw steering
-│   │   └── src/apogee_orbit/
-│   │       ├── core.py         # EquatorialOrbit class
-│   │       ├── attitude.py     # Yaw steering algorithm
-│   │       ├── simulator.py    # Orbit simulation API
-│   │       ├── plotting.py     # 3D visualization
-│   │       ├── cli.py          # Command-line interface
-│   │       └── types.py        # Data structures
-│   │
-│   └── apogee-api/             # FastAPI REST API
-│       └── src/apogee_api/
-│           ├── main.py         # FastAPI application
-│           ├── routers/        # API endpoints
-│           │   ├── launch.py   # Launch simulation endpoints
-│           │   ├── orbit.py    # Orbit & yaw steering endpoints
-│           │   └── health.py   # Health check
-│           └── schemas/        # Pydantic models
-│               ├── launch.py   # Launch request/response
-│               └── orbit.py    # Orbit request/response
-│
-├── docs/                        # Documentation & assets
-│   ├── nm_final_project.tex    # Mathematical formulation (LaTeX)
-│   ├── nm_final_project.pdf    # Compiled math report
-│   ├── 2_stages_rocket_launch.png
-│   ├── falcon9Trajectory.jpg
-│   ├── rocketForces.gif
-│   ├── variableMass.png
-│   └── general_earth_orbit.png
-│
-├── pyproject.toml              # Workspace root configuration
-└── README.md                   # This file
-```
+## Installation
+
+Detailed installation instructions are available at:  
+[docs/content/getting-started/installation.md](docs/content/getting-started/installation.md)
+
+## Quick Start
+
+Already installed? Learn how to use Apogee.  
+A hands-on guide to running your first launch simulation and understanding the output.  
+[docs/content/getting-started/quickstart.md](docs/content/getting-started/quickstart.md)
 
 ### Dependency Flow
 
