@@ -109,9 +109,13 @@ Detailed frontend documentation is available at:
 
 ## Mathematical Formulation
 
-All theoretical background and detailed derivations are available in:  
-[docs/content/theory](docs/content/theory)
+The complete mathematical theory and detailed derivations are documented in:  
+[Theory Documentation](docs/content/theory)
 
+A high-level summary of the theory is available in:  
+[Theory Index](docs/content/theory/index.md)
+
+It's used:
 
 ### State Vector
 
@@ -128,109 +132,77 @@ m(t)
 \end{bmatrix}
 $$
 
-see:  
+Detailed derivation:  
 [State Vector Theory](docs/content/theory/state-vector.md)
+
+---
 
 ### Equations of Motion
 
-The rocket dynamics are modeled using classical mechanics applied to a variable-mass system in planar polar coordinates.  
-The formulation includes kinematics, force balances, mass flow, and special flight phases.
+The rocket dynamics are modeled using classical mechanics for a variable-mass system in planar polar coordinates.  
+The formulation includes kinematics, force balances, mass flow, and special flight regimes.
 
-The model covers:
+It covers:
 
 - **Kinematics** (radial and angular motion)  
 - **Force analysis** (thrust, drag, and gravity)  
-- **Newton’s second law** in path coordinates (tangential and normal components)  
-- **Mass flow equation** (Tsiolkovsky rocket equation and mass depletion rate)  
-- **Numerical regularization** (treatment of singularities and safety guards)  
-- **Special cases** (vertical ascent, gravity turn, and coast phases)  
-- **Final ODE system** used for numerical integration  
+- **Newton’s second law** in path coordinates  
+- **Mass flow equation** (Tsiolkovsky rocket equation)  
+- **Numerical regularization** (singularity treatment and safety guards)  
+- **Special cases** (vertical ascent, gravity turn, and coast)  
+- **Final ODE system** for numerical integration  
 
-All theoretical background and detailed derivations are available at:  
+Full formulation:  
 [Equations of Motion Theory](docs/content/theory)
+
+---
 
 ### Atmosphere Model
 
-The atmospheric model provides altitude-dependent properties such as air density and speed of sound, which are required to compute aerodynamic forces during ascent.  
-It is based on a standard atmosphere representation and is used to evaluate drag, Mach number, and dynamic pressure along the trajectory.
+The atmospheric model provides altitude-dependent properties such as air density and speed of sound.  
+These quantities are required to compute aerodynamic forces, Mach number, and dynamic pressure during ascent.
 
-All theoretical background and detailed derivations are available at:  
+More details:  
 [Atmosphere Model Theory](docs/content/theory/atmosphere.md)
 
+---
 
 ### Flight Phases
-The ascent is modeled as a **hybrid dynamical system** composed of multiple flight phases, each governed by different dynamics and control laws.  
+
+The ascent is modeled as a **hybrid dynamical system** composed of multiple flight phases with different dynamics and control laws.  
 Phase transitions are triggered by physical events such as pitchover, stage separation, and fuel depletion.
 
-The model includes:
+Included phases:
 
 - **Phase A:** Vertical ascent  
 - **Phase B:** Stage-1 gravity turn  
 - **Phase C:** Coast phase  
 - **Phase D:** Stage-2 burn  
-- Event detection and phase transition handling  
-- Hybrid system implementation
+- Event detection and transition handling  
+- Hybrid system implementation  
 
-All theoretical background and detailed derivations are available at:  
+Full description:  
 [Hybrid Flight Phases Theory](docs/content/theory/flight-phases.md)
 
+---
 
+### Orbital Mechanics
 
-### Two-Body Orbital Diagnostics
+The orbital mechanics module evaluates the post-burn trajectory using the classical **two-body problem** formulation.  
+It computes orbital parameters to determine whether the achieved orbit satisfies the target conditions.
 
-<p align="center">
-  <img src="docs/general_earth_orbit.png" alt="Earth Orbit Geometry" width="450"/>
-</p>
+Analysis steps:
 
-At engine cutoff, compute osculating orbital elements:
+- **Specific orbital energy**  
+- **Specific angular momentum**  
+- **Orbital eccentricity**  
+- **Semi-major axis**  
+- **Apoapsis and periapsis altitudes**
 
-**Specific orbital energy:**
+From these quantities, the simulator derives the final orbital elements and insertion quality metrics.
 
-$$\varepsilon = \frac{v^2}{2} - \frac{\mu}{r}$$
-
-**Specific angular momentum (planar):**
-
-$$h = r v \cos(\gamma)$$
-
-**Eccentricity:**
-
-$$e = \sqrt{\max\left(0, 1 + \frac{2\varepsilon h^2}{\mu^2}\right)}$$
-
-**Semi-major axis (bound orbits, $\varepsilon < 0$):**
-
-$$a = -\frac{\mu}{2\varepsilon}$$
-
-**Apoapsis and periapsis:**
-
-$$r_a = a(1 + e), \quad r_p = a(1 - e)$$
-
-**Implementation**: `apogee_physics/orbit.py::orbit_diagnostics`
-
-### Orbital Mechanics & Yaw Steering (`apogee-orbit`)
-
-After orbital insertion, the satellite enters a **circular equatorial orbit**. The `apogee-orbit` module calculates optimal spacecraft orientation (yaw steering) to maximize solar panel power generation.
-
-<p align="center">
-  <img src="docs/orbit_3d_visualization.png" alt="3D Orbit Visualization with Yaw Steering" width="600"/>
-</p>
-
-#### Assumptions
-
-- **Circular orbit**: $e = 0$ (from launch optimization)
-- **Equatorial orbit**: $i = 0$ (eastward launch from equator)
-- **Two-body dynamics**: Keplerian motion, no perturbations
-
-#### Coordinate Frames
-
-**1. Earth-Centered Inertial (ECI):**
-- $\mathbf{Z}$: North pole
-- $\mathbf{X}$: Vernal equinox (reference for $t=0$)
-- $\mathbf{Y}$: Completes right-hand system
-
-**2. Local-Vertical Local-Horizontal (LVLH):**
-- $\mathbf{z}_L$ (Nadir): $-\mathbf{r}/|\mathbf{r}|$ (towards Earth center)
-- $\mathbf{x}_L$ (Velocity): Along orbital velocity vector
-- $\mathbf{y}_L$ (Cross-track): $\mathbf{z}_L \times \mathbf{x}_L$ (South for prograde equatorial)
+Detailed theory:  
+[Orbital Mechanics Theory](docs/content/theory/orbital-mechanics.md)
 
 #### Satellite State
 
