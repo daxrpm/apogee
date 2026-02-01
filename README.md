@@ -101,21 +101,12 @@ npm run dev
 - Onboard camera aligned tip-to-tail with a slight side offset
 - Propulsion and separation effects sized by stage/thrust/altitude
 
-**Frontend structure (clean feature boundaries):**
+Detailed frontend documentation is available at:
 
-```text
-frontend/src/
-├── features/
-│   ├── beach/         # launch site scene + control panel
-│   ├── launch/        # trajectory animation + cameras + FX
-│   └── navigation/    # intro scenes + transitions
-├── shared/
-│   └── terrain/       # reusable terrain renderer
-├── services/          # API client
-├── stores/            # Zustand global store
-├── utils/             # coordinate transforms + interpolation helpers
-└── App.tsx
-```
+- Architecture: [docs/content/frontend/architecture.md](docs\content\frontend\architecture.md)  
+- Components: [docs/content/frontend/components.md](docs\content\frontend\components.md)  
+- Overview: [docs/content/frontend/index.md](docs\content\frontend\index.md)
+
 
 ## Mathematical Formulation
 
