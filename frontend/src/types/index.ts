@@ -8,10 +8,10 @@
 // ============ SCENE TYPES ============
 
 /** Available scenes in the navigation flow */
-export type SceneType = 'ecuador' | 'quito' | 'pedernales' | 'beach' | 'launch' | 'orbit';
+export type SceneType = 'orbit_intro' | 'ecuador' | 'quito' | 'pedernales' | 'beach' | 'launch' | 'orbit';
 
 /** Navigation flow order */
-export const SCENE_ORDER: SceneType[] = ['ecuador', 'quito', 'pedernales', 'beach', 'launch', 'orbit'];
+export const SCENE_ORDER: SceneType[] = ['orbit_intro', 'ecuador', 'quito', 'pedernales', 'beach', 'launch', 'orbit'];
 
 // ============ TERRAIN TYPES ============
 
@@ -61,6 +61,7 @@ export interface SceneInfo {
 }
 
 export const SCENE_INFO: Record<SceneType, SceneInfo> = {
+    orbit_intro: { title: 'ORBIT', subtitle: 'Earth From Above • Globe View', emoji: '🌍' },
     ecuador: { title: 'ECUADOR', subtitle: 'Gateway to Space • 0° Latitude', emoji: '🇪🇨' },
     quito: { title: 'QUITO', subtitle: 'Capital City • 2,850m Elevation', emoji: '🏙️' },
     pedernales: { title: 'PEDERNALES', subtitle: 'Pacific Coast • Launch Region', emoji: '🏖️' },

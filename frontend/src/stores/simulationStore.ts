@@ -101,7 +101,7 @@ type SimulationStore = SimulationState & SimulationActions;
 // ============ INITIAL STATE ============
 
 const initialState: SimulationState = {
-  currentScene: 'ecuador',
+  currentScene: 'orbit_intro',
   hasSeenIntro: false,
   hTargetKm: 200,
   payloadKg: 5000,

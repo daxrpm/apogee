@@ -1,59 +1,64 @@
 /**
  * App.tsx - Main Application Entry Point
- * 
+ *
  * Navigation flow: Ecuador → Quito → Pedernales → Beach → Launch → Orbit
  * Uses real satellite textures and heightmaps for 3D terrain visualization.
- * 
+ *
  * @module App
  */
 
-import { useEffect, useState, useCallback } from 'react';
-import { BeachScene } from './features/beach';
-import { OrbitScene } from './features/orbit';
-import { 
+import { useEffect, useState, useCallback } from "react";
+import { BeachScene } from "./features/beach";
+import { OrbitIntroScene, OrbitScene } from "./features/orbit";
+import {
   SceneTransition,
   ProgressTimer,
   NavigationTerrainScene,
-} from './features/navigation';
-import { useSimulationStore } from './stores/simulationStore';
-import { SCENE_INFO, type SceneType } from './types';
-import YawSteeringLab from './lab/YawSteeringLab';
+} from "./features/navigation";
+import { useSimulationStore } from "./stores/simulationStore";
+import { SCENE_INFO, type SceneType } from "./types";
+import YawSteeringLab from "./lab/YawSteeringLab";
 
 // ============ CONSTANTS ============
 
-const INTRO_SCENES: SceneType[] = ['ecuador', 'quito', 'pedernales'];
-const MAIN_SCENES: SceneType[] = ['beach', 'launch', 'orbit'];
+const INTRO_SCENES: SceneType[] = [
+  "orbit_intro",
+  "ecuador",
+  "quito",
+  "pedernales",
+];
+const MAIN_SCENES: SceneType[] = ["beach", "launch", "orbit"];
 const AUTO_ADVANCE_MS = 10000;
 
 // ============ STYLES ============
 
 const styles = {
   container: {
-    width: '100vw',
-    height: '100vh',
-    position: 'relative' as const,
-    overflow: 'hidden',
-    background: '#000',
+    width: "100vw",
+    height: "100vh",
+    position: "relative" as const,
+    overflow: "hidden",
+    background: "#000",
   },
   skipButton: {
-    position: 'absolute' as const,
+    position: "absolute" as const,
     top: 20,
     right: 20,
     zIndex: 200,
-    background: 'rgba(255, 255, 255, 0.1)',
-    border: '1px solid rgba(255, 255, 255, 0.3)',
+    background: "rgba(255, 255, 255, 0.1)",
+    border: "1px solid rgba(255, 255, 255, 0.3)",
     borderRadius: 4,
-    padding: '8px 16px',
-    color: '#fff',
+    padding: "8px 16px",
+    color: "#fff",
     fontSize: 12,
     fontWeight: 600,
     letterSpacing: 1,
-    cursor: 'pointer',
+    cursor: "pointer",
     fontFamily: "'Roboto Mono', monospace",
-    transition: 'all 0.2s ease',
+    transition: "all 0.2s ease",
   },
   progressContainer: {
-    position: 'absolute' as const,
+    position: "absolute" as const,
     top: 20,
     right: 140,
     zIndex: 200,
@@ -64,21 +69,27 @@ const styles = {
 
 function App() {
   // Check if we're in lab mode (URL path = /lab)
-  const isLabMode = window.location.pathname === '/lab';
-  
+  const isLabMode = window.location.pathname === "/lab";
+
   if (isLabMode) {
     return <YawSteeringLab />;
   }
 
-  const { currentScene, nextScene, skipToBeach, hasSeenIntro } = useSimulationStore();
-  const [interactionScene, setInteractionScene] = useState<SceneType | null>(null);
+  const { currentScene, nextScene, skipToBeach, hasSeenIntro } =
+    useSimulationStore();
+  const [interactionScene, setInteractionScene] = useState<SceneType | null>(
+    null,
+  );
 
   const isIntroScene = INTRO_SCENES.includes(currentScene);
   const isUserInteracting = interactionScene === currentScene;
 
-  const handleInteractionChange = useCallback((isInteracting: boolean) => {
-    setInteractionScene(isInteracting ? currentScene : null);
-  }, [currentScene]);
+  const handleInteractionChange = useCallback(
+    (isInteracting: boolean) => {
+      setInteractionScene(isInteracting ? currentScene : null);
+    },
+    [currentScene],
+  );
 
   // Skip intro on reload if already seen
   useEffect(() => {
@@ -97,25 +108,32 @@ function App() {
     <div style={styles.container}>
       {/* Intro terrain scenes */}
       {INTRO_SCENES.map((sceneId) => (
-        <SceneTransition 
+        <SceneTransition
           key={sceneId}
-          isActive={currentScene === sceneId} 
+          isActive={currentScene === sceneId}
           autoAdvanceMs={AUTO_ADVANCE_MS}
           onComplete={nextScene}
           isPaused={isUserInteracting}
         >
-          <NavigationTerrainScene 
-            regionId={sceneId as 'ecuador' | 'quito' | 'pedernales'}
-            sceneInfo={SCENE_INFO[sceneId]}
-            onContinue={nextScene}
-            onInteractionChange={handleInteractionChange}
-          />
+          {sceneId === "orbit_intro" ? (
+            <OrbitIntroScene
+              onContinue={nextScene}
+              onInteractionChange={handleInteractionChange}
+            />
+          ) : (
+            <NavigationTerrainScene
+              regionId={sceneId as "ecuador" | "quito" | "pedernales"}
+              sceneInfo={SCENE_INFO[sceneId]}
+              onContinue={nextScene}
+              onInteractionChange={handleInteractionChange}
+            />
+          )}
           {currentScene === sceneId && (
             <div style={styles.progressContainer}>
-              <ProgressTimer 
-                duration={AUTO_ADVANCE_MS} 
+              <ProgressTimer
+                duration={AUTO_ADVANCE_MS}
                 isActive={currentScene === sceneId}
-                isPaused={isUserInteracting} 
+                isPaused={isUserInteracting}
               />
             </div>
           )}
@@ -124,14 +142,14 @@ function App() {
 
       {/* Skip intro button */}
       {isIntroScene && (
-        <button 
+        <button
           style={styles.skipButton}
           onClick={skipToBeach}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
+            e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+            e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
           }}
         >
           SKIP INTRO →
@@ -139,11 +157,11 @@ function App() {
       )}
 
       {/* Main scenes (Beach, Launch, Orbit) */}
-      <SceneTransition 
+      <SceneTransition
         isActive={MAIN_SCENES.includes(currentScene)}
         autoAdvanceMs={0}
       >
-        {currentScene === 'orbit' ? (
+        {currentScene === "orbit" ? (
           <OrbitScene />
         ) : (
           <BeachScene showStats={false} showModels={true} />
