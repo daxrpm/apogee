@@ -107,120 +107,74 @@ Detailed frontend documentation is available at:
 - Components: [docs/content/frontend/components.md](docs\content\frontend\components.md)  
 - Overview: [docs/content/frontend/index.md](docs\content\frontend\index.md)
 
-
 ## Mathematical Formulation
+
+All theoretical background and detailed derivations are available in:  
+[docs/content/theory](docs/content/theory)
+
 
 ### State Vector
 
-The rocket state is described in **planar polar coordinates** (inertial frame):
+The rocket state is described in **planar polar coordinates** in an inertial reference frame:
 
-$$\mathbf{y}(t) = \begin{bmatrix} r(t) \\ \lambda(t) \\ v(t) \\ \gamma(t) \\ m(t) \end{bmatrix}$$
+$$
+\mathbf{y}(t) =
+\begin{bmatrix}
+r(t) \\
+\lambda(t) \\
+v(t) \\
+\gamma(t) \\
+m(t)
+\end{bmatrix}
+$$
 
-Where:
-- **$r(t)$**: Geocentric radius [m]
-- **$\lambda(t)$**: Downrange central angle [rad]
-- **$v(t)$**: Speed magnitude [m/s]
-- **$\gamma(t)$**: Flight-path angle (FPA) from local horizontal [rad]
-- **$m(t)$**: Vehicle mass [kg]
-
-Altitude: $h(t) = r(t) - R_E$
-
-<p align="center">
-  <img src="docs/2_stages_rocket_launch.png" alt="Two-Stage Rocket Launch" width="500"/>
-</p>
+see:  
+[State Vector Theory](docs/content/theory/state-vector.md)
 
 ### Equations of Motion
 
-#### Kinematics
+The rocket dynamics are modeled using classical mechanics applied to a variable-mass system in planar polar coordinates.  
+The formulation includes kinematics, force balances, mass flow, and special flight phases.
 
-$$\frac{dr}{dt} = v \sin(\gamma)$$
+The model covers:
 
-$$\frac{d\lambda}{dt} = \frac{v \cos(\gamma)}{r}$$
+- **Kinematics** (radial and angular motion)  
+- **Force analysis** (thrust, drag, and gravity)  
+- **Newton’s second law** in path coordinates (tangential and normal components)  
+- **Mass flow equation** (Tsiolkovsky rocket equation and mass depletion rate)  
+- **Numerical regularization** (treatment of singularities and safety guards)  
+- **Special cases** (vertical ascent, gravity turn, and coast phases)  
+- **Final ODE system** used for numerical integration  
 
-#### Dynamics
+All theoretical background and detailed derivations are available at:  
+[Equations of Motion Theory](docs/content/theory)
 
-<p align="center">
-  <img src="docs/rocketForces.gif" alt="Rocket Forces Diagram" width="350"/>
-</p>
+### Atmosphere Model
 
-**Speed equation:**
+The atmospheric model provides altitude-dependent properties such as air density and speed of sound, which are required to compute aerodynamic forces during ascent.  
+It is based on a standard atmosphere representation and is used to evaluate drag, Mach number, and dynamic pressure along the trajectory.
 
-$$\frac{dv}{dt} = \frac{T}{m}\cos(\alpha) - \frac{D}{m} - \frac{\mu}{r^2}\sin(\gamma)$$
+All theoretical background and detailed derivations are available at:  
+[Atmosphere Model Theory](docs/content/theory/atmosphere.md)
 
-**Flight-path angle equation:**
 
-$$\frac{d\gamma}{dt} = \frac{T}{mv}\sin(\alpha) + \left(\frac{v}{r} - \frac{\mu}{r^2 v}\right)\cos(\gamma)$$
+### Flight Phases
+The ascent is modeled as a **hybrid dynamical system** composed of multiple flight phases, each governed by different dynamics and control laws.  
+Phase transitions are triggered by physical events such as pitchover, stage separation, and fuel depletion.
 
-**Mass equation (variable mass):**
+The model includes:
 
-<p align="center">
-  <img src="docs/variableMass.png" alt="Variable Mass System" width="400"/>
-</p>
+- **Phase A:** Vertical ascent  
+- **Phase B:** Stage-1 gravity turn  
+- **Phase C:** Coast phase  
+- **Phase D:** Stage-2 burn  
+- Event detection and phase transition handling  
+- Hybrid system implementation
 
-$$\frac{dm}{dt} = -\frac{T}{I_{sp} \cdot g_0}$$
+All theoretical background and detailed derivations are available at:  
+[Hybrid Flight Phases Theory](docs/content/theory/flight-phases.md)
 
-Where:
-- **$T$**: Thrust [N]
-- **$\alpha$**: Steering angle (thrust vs. velocity) [rad]
-- **$D$**: Aerodynamic drag [N]
-- **$\mu$**: Earth gravitational parameter [m³/s²]
-- **$I_{sp}$**: Specific impulse [s]
-- **$g_0$**: Standard gravity (9.80665 m/s²)
 
-**Implementation**: `apogee_physics/dynamics.py::rhs_general`
-
-### Aerodynamic Model
-
-**Mach number:**
-
-$$M = \frac{v}{a_s(h)}$$
-
-**Drag force:**
-
-$$D = \frac{1}{2} \rho(h) C_D(M) A_{ref} v^2$$
-
-**Dynamic pressure:**
-
-$$q = \frac{1}{2} \rho(h) v^2$$
-
-Where:
-- **$\rho(h)$**: Atmospheric density from USSA76 [kg/m³]
-- **$a_s(h)$**: Speed of sound from USSA76 [m/s]
-- **$C_D(M)$**: Drag coefficient (function of Mach number)
-- **$A_{ref}$**: Reference area [m²]
-
-**Implementation**: `apogee_physics/atmosphere.py`, `apogee_physics/dynamics.py::compute_derived`
-
-### Hybrid Flight Phases
-
-The ascent is modeled as a **hybrid dynamical system** with event-driven phase transitions:
-
-#### Phase A: Vertical Ascent
-
-- **Constraint**: $\gamma = \pi/2$ (vertical)
-- **Event**: Altitude reaches $h_{pitchover}$
-- **Action**: Instantaneous pitch-over to $\gamma^+ = \pi/2 - \theta_0$
-
-#### Phase B: Stage-1 Gravity Turn
-
-- **Steering**: $\alpha = 0$ (thrust aligned with velocity)
-- **Event**: Mass reaches $m_{1,end}$ (burnout)
-- **Action**: Stage separation, mass drop: $m^+ = m^- - m_{1,dry}$
-
-#### Phase C: Coast
-
-- **Dynamics**: $T = 0$, $dm/dt = 0$
-- **Duration**: $t_{coast}$ (optimization variable)
-
-#### Phase D: Stage-2 Burn
-
-- **Steering**: $\alpha = \alpha_2$ (constant, optimization variable)
-- **Events**: 
-  - Time limit: $t = t_{burn2}$
-  - Fuel depletion: $m = m_{min} = m_{2,dry} + m_{payload}$
-  - Ground impact: $r = R_E$
-
-**Implementation**: `apogee_physics/simulate.py`
 
 ### Two-Body Orbital Diagnostics
 
