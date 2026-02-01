@@ -6,6 +6,8 @@
   <img src="docs/falcon9Rocket.jpg" alt="Falcon 9 Launch" width="600"/>
 </p>
 
+
+
 ## Project Overview
 
 Apogee is a comprehensive space mission simulator designed to model the complete lifecycle of a satellite deployment mission:
@@ -33,6 +35,8 @@ Apogee is a comprehensive space mission simulator designed to model the complete
    - Propulsion and separation effects (✅ Implemented)
    - Orbital path rendering (🔄 Future)
    - Satellite attitude animation (🔄 Future)
+
+
 
 ### Design Philosophy
 
@@ -82,6 +86,8 @@ apogee-physics (JAX/Diffrax)
 
 **Design principle**: Each layer consumes the layer below directly. No logic duplication.
 
+
+
 ### Frontend (`frontend/`)
 
 The frontend is a React + React Three Fiber application that renders the launch scene and plays back the backend trajectory data.
@@ -106,6 +112,8 @@ Detailed frontend documentation is available at:
 - Architecture: [docs/content/frontend/architecture.md](docs\content\frontend\architecture.md)  
 - Components: [docs/content/frontend/components.md](docs\content\frontend\components.md)  
 - Overview: [docs/content/frontend/index.md](docs\content\frontend\index.md)
+
+
 
 ## Mathematical Formulation
 
@@ -206,133 +214,22 @@ Detailed theory:
 
 
 
-
-### Shooting Method for Circular Orbit Insertion
-
-The circular orbit insertion problem is formulated as a **nonlinear root-finding problem**:
-
-**Decision variables (control vector):**
-
-$$\mathbf{u} = \begin{bmatrix} \theta_0 \\ t_{coast} \\ t_{burn2} \\ \alpha_2 \end{bmatrix}$$
-
-
-
 ## Numerical Methods
 
 All documentation for numerical methods is located in the folder:  
 [`docs/content/numerical-methods`](docs/content/numerical-methods)
 
 For a summary, check:  
-[`docs/content/numerical-methods/index.md`](docs/content/numerical-methods/index.md)
+[docs/content/numerical-methods/index.md](docs/content/numerical-methods/index.md)
 
 ### Ode Integration
-[`docs/content/numerical-methods/ode-integration/index.md`](docs/content/numerical-methods/ode-integration/index.md)  
-
+[docs/content/numerical-methods/ode-integration/index.md](docs/content/numerical-methods/ode-integration/index.md)  
 ### Optimization Algorithm
-[`docs/content/numerical-methods/optimization/index.md`](docs/content/numerical-methods/optimization/index.md)  
-
+[docs/content/numerical-methods/optimization/index.md](docs/content/numerical-methods/optimization/index.md)  
 ### Stability
-[`docs/content/numerical-methods/stability/index.md`](docs/content/numerical-methods/stability/index.md)  
+[docs/content/numerical-methods/stability/index.md](docs/content/numerical-methods/stability/index.md)  
 
-#### 1. Bound Constraints via Logistic Re-parameterization
 
-Physical bounds are enforced:
-
-$$\theta_0 \in [\theta_{min}, \theta_{max}]$$
-$$t_{coast} \in [0, 200] \text{ s}$$
-$$t_{burn2} \in [50, 450] \text{ s}$$
-$$\alpha_2 \in [\alpha_{min}, \alpha_{max}]$$
-
-Introduce unconstrained variables $\mathbf{x} \in \mathbb{R}^4$:
-
-$$u_i(x_i) = u_{i,min} + (u_{i,max} - u_{i,min}) \cdot \sigma(x_i)$$
-
-$$\sigma(x) = \frac{1}{1 + e^{-x}} \quad \text{(logistic function)}$$
-
-**Implementation**: `apogee_physics/shooting.py::_u_from_x`, `_x_from_u`
-
-#### 2. Finite-Difference Jacobian
-
-Compute Jacobian $\mathbf{J} = \frac{\partial \mathbf{F}}{\partial \mathbf{x}}$ using forward differences:
-
-$$\mathbf{J}_{:,i} \approx \frac{\mathbf{F}(\mathbf{x} + \Delta x_i \mathbf{e}_i) - \mathbf{F}(\mathbf{x})}{\Delta x_i}$$
-
-**Implementation**: `apogee_physics/shooting.py::_fd_jacobian_x`
-
-#### 3. Levenberg-Marquardt Step
-
-At iteration $k$, solve damped normal equations:
-
-$$(\mathbf{J}_k^T \mathbf{J}_k + \lambda_k \mathbf{I}) \Delta\mathbf{x}_k = -\mathbf{J}_k^T \mathbf{F}_k$$
-
-Backtracking line search: try step lengths $\alpha \in \{1, \frac{1}{2}, \frac{1}{4}, \ldots\}$ until:
-
-$$\|\mathbf{F}(\mathbf{x}_k + \alpha \cdot \Delta\mathbf{x}_k)\|_2 < \|\mathbf{F}(\mathbf{x}_k)\|_2$$
-
-**Implementation**: `apogee_physics/shooting.py::_newton`
-
-#### 4. Broyden Rank-1 Update
-
-After accepted step $\mathbf{s} = \mathbf{x}_{k+1} - \mathbf{x}_k$ and $\mathbf{y} = \mathbf{F}_{k+1} - \mathbf{F}_k$:
-
-$$\mathbf{J}_{k+1} = \mathbf{J}_k + \frac{(\mathbf{y} - \mathbf{J}_k \mathbf{s})\mathbf{s}^T}{\mathbf{s}^T \mathbf{s}}$$
-
-This reduces expensive residual evaluations while maintaining superlinear convergence.
-
-**Implementation**: `apogee_physics/shooting.py::_broyden_update`
-
-#### 5. Multistart Strategy
-
-Generate candidate initial guesses from coarse grids over each control variable, score by $\|\mathbf{F}(\mathbf{u}_0)\|_2$, and select best initializations.
-
-**Implementation**: `apogee_physics/shooting.py` (candidate generation)
-
-### ODE Integration
-
-Each flight phase is integrated using:
-
-- **Solver**: Tsitouras 5(4) explicit Runge-Kutta (`diffrax.Tsit5`)
-- **Step control**: PID controller with adaptive time-stepping
-  - Relative tolerance: `rtol = 1e-6`
-  - Absolute tolerance: `atol = 1e-6`
-- **Event detection**: Newton root-finding (`optimistix.Newton`)
-  - Root relative tolerance: `root_rtol = 1e-6`
-  - Root absolute tolerance: `root_atol = 1e-3`
-- **Saving**: Initial time + all accepted steps
-
-**Implementation**: `apogee_physics/simulate.py::_solve_segment`
-
-### Numerical Regularizations
-
-#### Guard for 1/v singularity
-
-Near liftoff ($v \to 0$), the $\dot{\gamma}$ equation contains $1/v$. Replace:
-
-$$\frac{1}{v} \quad \to \quad \frac{v}{v^2 + v_\varepsilon^2}$$
-
-Matches $1/v$ for $v \gg v_\varepsilon$, bounded at $v = 0$.
-
-**Implementation**: `apogee_physics/dynamics.py::rhs_general` (variable `inv_v`)
-
-#### Guard for 1/r collapse
-
-Prevent numerical issues if $r$ becomes non-physical:
-
-$$r_{safe} = \max(r, 0.99 \cdot R_E)$$
-
-Use $r_{safe}$ in all denominator terms.
-
-**Implementation**: `apogee_physics/dynamics.py::rhs_general` (variable `r_safe`)
-
-#### Time Monotonicity Enforcement
-
-Adaptive solvers and event boundaries can produce non-increasing time samples. Enforce strict monotonicity:
-
-$$t_{k+1} > t_k \quad \forall k$$
-
-by filtering and applying mask to all derived series.
-
-**Implementation**: `apogee_physics/simulate.py::_strictly_increasing_mask`
 
 ## Installation
 
