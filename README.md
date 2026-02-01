@@ -6,6 +6,8 @@
   <img src="docs/falcon9Rocket.jpg" alt="Falcon 9 Launch" width="600"/>
 </p>
 
+
+
 ## Project Overview
 
 Apogee is a comprehensive space mission simulator designed to model the complete lifecycle of a satellite deployment mission:
@@ -34,6 +36,8 @@ Apogee is a comprehensive space mission simulator designed to model the complete
    - Orbital path rendering (🔄 Future)
    - Satellite attitude animation (🔄 Future)
 
+
+
 ### Design Philosophy
 
 The implementation is designed to be:
@@ -43,65 +47,30 @@ The implementation is designed to be:
 - **Physically accurate**: USSA76 atmosphere, variable mass dynamics, non-constant gravity
 - **Production-ready**: JSON-serializable output, FastAPI backend, modular architecture
 - **Extensible**: Clean separation between physics engine, simulators, and API layers
+## Getting Started
+
+Never used Apogee? Start here.  
+Learn how to install Apogee and run your first simulation.  
+[docs/content/getting-started/index.md](docs/content/getting-started/index.md)
 
 ## Architecture
 
-### Monorepo Structure
+The project follows a monorepo architecture using *uv workspaces* to manage multiple related Python packages in a single repository.  
+Each package is responsible for a specific part of the system (physics engine, launch simulation, orbital mechanics, and API), which improves modularity, maintainability, and code reuse.
 
-Apogee uses a **monorepo with uv workspaces** for dependency management and modular organization:
+The full architecture description is available at:  
+[docs/content/getting-started/architecture.md](docs/content/getting-started/architecture.md)
 
-```text
-apogee/
-├── packages/                    # Python packages (uv workspace)
-│   ├── apogee-physics/         # Pure physics engine (JAX/Diffrax)
-│   │   └── src/apogee_physics/
-│   │       ├── atmosphere.py   # USSA76 atmosphere model
-│   │       ├── dynamics.py     # ODE right-hand side functions
-│   │       ├── simulate.py     # Hybrid simulation with events
-│   │       ├── orbit.py        # Two-body orbital diagnostics
-│   │       ├── shooting.py     # Shooting method solver (LM + Broyden)
-│   │       ├── trajectory.py   # Trajectory data structure
-│   │       ├── types.py        # Type definitions (dataclasses)
-│   │       └── calibration.py  # Vehicle parameter calibration
-│   │
-│   ├── apogee-launch/          # Launch simulator + CLI
-│   │   └── src/apogee_launch/
-│   │       ├── simulator.py    # Public API (solve_to_circular_orbit)
-│   │       ├── falcon9.py      # Falcon 9 v1.2 FT parameters
-│   │       └── cli.py          # Command-line interface (Typer)
-│   │
-│   ├── apogee-orbit/           # Orbital mechanics & yaw steering
-│   │   └── src/apogee_orbit/
-│   │       ├── core.py         # EquatorialOrbit class
-│   │       ├── attitude.py     # Yaw steering algorithm
-│   │       ├── simulator.py    # Orbit simulation API
-│   │       ├── plotting.py     # 3D visualization
-│   │       ├── cli.py          # Command-line interface
-│   │       └── types.py        # Data structures
-│   │
-│   └── apogee-api/             # FastAPI REST API
-│       └── src/apogee_api/
-│           ├── main.py         # FastAPI application
-│           ├── routers/        # API endpoints
-│           │   ├── launch.py   # Launch simulation endpoints
-│           │   ├── orbit.py    # Orbit & yaw steering endpoints
-│           │   └── health.py   # Health check
-│           └── schemas/        # Pydantic models
-│               ├── launch.py   # Launch request/response
-│               └── orbit.py    # Orbit request/response
-│
-├── docs/                        # Documentation & assets
-│   ├── nm_final_project.tex    # Mathematical formulation (LaTeX)
-│   ├── nm_final_project.pdf    # Compiled math report
-│   ├── 2_stages_rocket_launch.png
-│   ├── falcon9Trajectory.jpg
-│   ├── rocketForces.gif
-│   ├── variableMass.png
-│   └── general_earth_orbit.png
-│
-├── pyproject.toml              # Workspace root configuration
-└── README.md                   # This file
-```
+## Installation
+
+Detailed installation instructions are available at:  
+[docs/content/getting-started/installation.md](docs/content/getting-started/installation.md)
+
+## Quick Start
+
+Already installed? Learn how to use Apogee.  
+A hands-on guide to running your first launch simulation and understanding the output.  
+[docs/content/getting-started/quickstart.md](docs/content/getting-started/quickstart.md)
 
 ### Dependency Flow
 
@@ -116,6 +85,8 @@ apogee-physics (JAX/Diffrax)
 ```
 
 **Design principle**: Each layer consumes the layer below directly. No logic duplication.
+
+
 
 ### Frontend (`frontend/`)
 
@@ -136,382 +107,129 @@ npm run dev
 - Onboard camera aligned tip-to-tail with a slight side offset
 - Propulsion and separation effects sized by stage/thrust/altitude
 
-**Frontend structure (clean feature boundaries):**
+Detailed frontend documentation is available at:
 
-```text
-frontend/src/
-├── features/
-│   ├── beach/         # launch site scene + control panel
-│   ├── launch/        # trajectory animation + cameras + FX
-│   └── navigation/    # intro scenes + transitions
-├── shared/
-│   └── terrain/       # reusable terrain renderer
-├── services/          # API client
-├── stores/            # Zustand global store
-├── utils/             # coordinate transforms + interpolation helpers
-└── App.tsx
-```
+- Architecture: [docs/content/frontend/architecture.md](docs\content\frontend\architecture.md)  
+- Components: [docs/content/frontend/components.md](docs\content\frontend\components.md)  
+- Overview: [docs/content/frontend/index.md](docs\content\frontend\index.md)
+
+
 
 ## Mathematical Formulation
 
+The complete mathematical theory and detailed derivations are documented in:  
+[Theory Documentation](docs/content/theory)
+
+A high-level summary of the theory is available in:  
+[Theory Index](docs/content/theory/index.md)
+
+It's used:
+
 ### State Vector
 
-The rocket state is described in **planar polar coordinates** (inertial frame):
+The rocket state is described in **planar polar coordinates** in an inertial reference frame:
 
-$$\mathbf{y}(t) = \begin{bmatrix} r(t) \\ \lambda(t) \\ v(t) \\ \gamma(t) \\ m(t) \end{bmatrix}$$
+$$
+\mathbf{y}(t) =
+\begin{bmatrix}
+r(t) \\
+\lambda(t) \\
+v(t) \\
+\gamma(t) \\
+m(t)
+\end{bmatrix}
+$$
 
-Where:
-- **$r(t)$**: Geocentric radius [m]
-- **$\lambda(t)$**: Downrange central angle [rad]
-- **$v(t)$**: Speed magnitude [m/s]
-- **$\gamma(t)$**: Flight-path angle (FPA) from local horizontal [rad]
-- **$m(t)$**: Vehicle mass [kg]
+Detailed derivation:  
+[State Vector Theory](docs/content/theory/state-vector.md)
 
-Altitude: $h(t) = r(t) - R_E$
-
-<p align="center">
-  <img src="docs/2_stages_rocket_launch.png" alt="Two-Stage Rocket Launch" width="500"/>
-</p>
+---
 
 ### Equations of Motion
 
-#### Kinematics
+The rocket dynamics are modeled using classical mechanics for a variable-mass system in planar polar coordinates.  
+The formulation includes kinematics, force balances, mass flow, and special flight regimes.
 
-$$\frac{dr}{dt} = v \sin(\gamma)$$
+It covers:
 
-$$\frac{d\lambda}{dt} = \frac{v \cos(\gamma)}{r}$$
+- **Kinematics** (radial and angular motion)  
+- **Force analysis** (thrust, drag, and gravity)  
+- **Newton’s second law** in path coordinates  
+- **Mass flow equation** (Tsiolkovsky rocket equation)  
+- **Numerical regularization** (singularity treatment and safety guards)  
+- **Special cases** (vertical ascent, gravity turn, and coast)  
+- **Final ODE system** for numerical integration  
 
-#### Dynamics
+Full formulation:  
+[Equations of Motion Theory](docs/content/theory)
 
-<p align="center">
-  <img src="docs/rocketForces.gif" alt="Rocket Forces Diagram" width="350"/>
-</p>
+---
 
-**Speed equation:**
+### Atmosphere Model
 
-$$\frac{dv}{dt} = \frac{T}{m}\cos(\alpha) - \frac{D}{m} - \frac{\mu}{r^2}\sin(\gamma)$$
+The atmospheric model provides altitude-dependent properties such as air density and speed of sound.  
+These quantities are required to compute aerodynamic forces, Mach number, and dynamic pressure during ascent.
 
-**Flight-path angle equation:**
+More details:  
+[Atmosphere Model Theory](docs/content/theory/atmosphere.md)
 
-$$\frac{d\gamma}{dt} = \frac{T}{mv}\sin(\alpha) + \left(\frac{v}{r} - \frac{\mu}{r^2 v}\right)\cos(\gamma)$$
+---
 
-**Mass equation (variable mass):**
+### Flight Phases
 
-<p align="center">
-  <img src="docs/variableMass.png" alt="Variable Mass System" width="400"/>
-</p>
+The ascent is modeled as a **hybrid dynamical system** composed of multiple flight phases with different dynamics and control laws.  
+Phase transitions are triggered by physical events such as pitchover, stage separation, and fuel depletion.
 
-$$\frac{dm}{dt} = -\frac{T}{I_{sp} \cdot g_0}$$
+Included phases:
 
-Where:
-- **$T$**: Thrust [N]
-- **$\alpha$**: Steering angle (thrust vs. velocity) [rad]
-- **$D$**: Aerodynamic drag [N]
-- **$\mu$**: Earth gravitational parameter [m³/s²]
-- **$I_{sp}$**: Specific impulse [s]
-- **$g_0$**: Standard gravity (9.80665 m/s²)
+- **Phase A:** Vertical ascent  
+- **Phase B:** Stage-1 gravity turn  
+- **Phase C:** Coast phase  
+- **Phase D:** Stage-2 burn  
+- Event detection and transition handling  
+- Hybrid system implementation  
 
-**Implementation**: `apogee_physics/dynamics.py::rhs_general`
+Full description:  
+[Hybrid Flight Phases Theory](docs/content/theory/flight-phases.md)
 
-### Aerodynamic Model
+---
 
-**Mach number:**
+### Orbital Mechanics
 
-$$M = \frac{v}{a_s(h)}$$
+The orbital mechanics module evaluates the post-burn trajectory using the classical **two-body problem** formulation.  
+It computes orbital parameters to determine whether the achieved orbit satisfies the target conditions.
 
-**Drag force:**
+Analysis steps:
 
-$$D = \frac{1}{2} \rho(h) C_D(M) A_{ref} v^2$$
+- **Specific orbital energy**  
+- **Specific angular momentum**  
+- **Orbital eccentricity**  
+- **Semi-major axis**  
+- **Apoapsis and periapsis altitudes**
 
-**Dynamic pressure:**
+From these quantities, the simulator derives the final orbital elements and insertion quality metrics.
 
-$$q = \frac{1}{2} \rho(h) v^2$$
+Detailed theory:  
+[Orbital Mechanics Theory](docs/content/theory/orbital-mechanics.md)
 
-Where:
-- **$\rho(h)$**: Atmospheric density from USSA76 [kg/m³]
-- **$a_s(h)$**: Speed of sound from USSA76 [m/s]
-- **$C_D(M)$**: Drag coefficient (function of Mach number)
-- **$A_{ref}$**: Reference area [m²]
 
-**Implementation**: `apogee_physics/atmosphere.py`, `apogee_physics/dynamics.py::compute_derived`
 
-### Hybrid Flight Phases
+## Numerical Methods
 
-The ascent is modeled as a **hybrid dynamical system** with event-driven phase transitions:
+All documentation for numerical methods is located in the folder:  
+[`docs/content/numerical-methods`](docs/content/numerical-methods)
 
-#### Phase A: Vertical Ascent
+For a summary, check:  
+[docs/content/numerical-methods/index.md](docs/content/numerical-methods/index.md)
 
-- **Constraint**: $\gamma = \pi/2$ (vertical)
-- **Event**: Altitude reaches $h_{pitchover}$
-- **Action**: Instantaneous pitch-over to $\gamma^+ = \pi/2 - \theta_0$
-
-#### Phase B: Stage-1 Gravity Turn
-
-- **Steering**: $\alpha = 0$ (thrust aligned with velocity)
-- **Event**: Mass reaches $m_{1,end}$ (burnout)
-- **Action**: Stage separation, mass drop: $m^+ = m^- - m_{1,dry}$
-
-#### Phase C: Coast
-
-- **Dynamics**: $T = 0$, $dm/dt = 0$
-- **Duration**: $t_{coast}$ (optimization variable)
-
-#### Phase D: Stage-2 Burn
-
-- **Steering**: $\alpha = \alpha_2$ (constant, optimization variable)
-- **Events**: 
-  - Time limit: $t = t_{burn2}$
-  - Fuel depletion: $m = m_{min} = m_{2,dry} + m_{payload}$
-  - Ground impact: $r = R_E$
-
-**Implementation**: `apogee_physics/simulate.py`
-
-### Two-Body Orbital Diagnostics
-
-<p align="center">
-  <img src="docs/general_earth_orbit.png" alt="Earth Orbit Geometry" width="450"/>
-</p>
-
-At engine cutoff, compute osculating orbital elements:
-
-**Specific orbital energy:**
-
-$$\varepsilon = \frac{v^2}{2} - \frac{\mu}{r}$$
-
-**Specific angular momentum (planar):**
-
-$$h = r v \cos(\gamma)$$
-
-**Eccentricity:**
-
-$$e = \sqrt{\max\left(0, 1 + \frac{2\varepsilon h^2}{\mu^2}\right)}$$
-
-**Semi-major axis (bound orbits, $\varepsilon < 0$):**
-
-$$a = -\frac{\mu}{2\varepsilon}$$
-
-**Apoapsis and periapsis:**
-
-$$r_a = a(1 + e), \quad r_p = a(1 - e)$$
-
-**Implementation**: `apogee_physics/orbit.py::orbit_diagnostics`
-
-### Orbital Mechanics & Yaw Steering (`apogee-orbit`)
-
-After orbital insertion, the satellite enters a **circular equatorial orbit**. The `apogee-orbit` module calculates optimal spacecraft orientation (yaw steering) to maximize solar panel power generation.
-
-<p align="center">
-  <img src="docs/orbit_3d_visualization.png" alt="3D Orbit Visualization with Yaw Steering" width="600"/>
-</p>
-
-#### Assumptions
-
-- **Circular orbit**: $e = 0$ (from launch optimization)
-- **Equatorial orbit**: $i = 0$ (eastward launch from equator)
-- **Two-body dynamics**: Keplerian motion, no perturbations
-
-#### Coordinate Frames
-
-**1. Earth-Centered Inertial (ECI):**
-- $\mathbf{Z}$: North pole
-- $\mathbf{X}$: Vernal equinox (reference for $t=0$)
-- $\mathbf{Y}$: Completes right-hand system
-
-**2. Local-Vertical Local-Horizontal (LVLH):**
-- $\mathbf{z}_L$ (Nadir): $-\mathbf{r}/|\mathbf{r}|$ (towards Earth center)
-- $\mathbf{x}_L$ (Velocity): Along orbital velocity vector
-- $\mathbf{y}_L$ (Cross-track): $\mathbf{z}_L \times \mathbf{x}_L$ (South for prograde equatorial)
-
-#### Satellite State
-
-Position in ECI for circular equatorial orbit:
-
-$$\mathbf{r}(t) = r \begin{bmatrix} \cos(\nu) \\ \sin(\nu) \\ 0 \end{bmatrix}$$
-
-Where:
-- $r = a$ (semi-major axis from launch)
-- $\nu = \nu_0 + n \cdot t$ (true anomaly)
-- $n = \sqrt{\mu/r^3}$ (mean motion)
-- $\nu_0$ (initial anomaly from launch trajectory $\lambda_{final}$)
-
-**Orbital period:**
-
-$$T = \frac{2\pi}{n} = 2\pi \sqrt{\frac{r^3}{\mu}}$$
-
-**Implementation**: `apogee_orbit/core.py::EquatorialOrbit`
-
-#### LVLH Basis Vectors
-
-For equatorial orbit at true anomaly $\nu$:
-
-$$\mathbf{x}_L = \begin{bmatrix} -\sin(\nu) \\ \cos(\nu) \\ 0 \end{bmatrix}, \quad
-\mathbf{y}_L = \begin{bmatrix} 0 \\ 0 \\ -1 \end{bmatrix}, \quad
-\mathbf{z}_L = \begin{bmatrix} -\cos(\nu) \\ -\sin(\nu) \\ 0 \end{bmatrix}$$
-
-**Implementation**: `apogee_orbit/core.py::EquatorialOrbit.get_lvlh_basis`
-
-#### Yaw Steering Algorithm
-
-The sun vector $\mathbf{s}_{ECI}$ (arbitrary unit vector) is transformed to LVLH frame:
-
-$$\mathbf{s}_{local} = \begin{bmatrix} \mathbf{s} \cdot \mathbf{x}_L \\ \mathbf{s} \cdot \mathbf{y}_L \\ \mathbf{s} \cdot \mathbf{z}_L \end{bmatrix}$$
-
-**Yaw angle** (rotation about nadir axis):
-
-$$\psi = \arctan2(s_{y,local}, s_{x,local})$$
-
-This control law rotates the spacecraft body frame such that the sun vector lies in the Body X-Z plane, allowing solar panels (rotating about Body Y) to track the sun optimally.
-
-**Beta angle** (sun elevation above orbital plane):
-
-$$\beta = \arcsin(-s_{y,local})$$
-
-For equatorial orbits with sun in the equatorial plane, $\beta \approx 0$.
-
-**Implementation**: `apogee_orbit/attitude.py::calculate_yaw_steering`
-
-#### Physical Interpretation
-
-| Condition | Yaw Angle | Meaning |
-|-----------|-----------|---------|
-| Sun ahead of velocity | $\psi = 0°$ | Satellite "faces forward" |
-| Sun behind velocity | $\psi = 180°$ | Satellite "faces backward" |
-| Sun at ±90° | $\psi = ±90°$ | Satellite rotates sideways |
-
-The yaw profile exhibits characteristic **180° flips** when the sun crosses the velocity/anti-velocity boundary (at $\nu = 0°$ and $\nu = 180°$ for sun at $+X$).
-
-
-
-### Shooting Method for Circular Orbit Insertion
-
-The circular orbit insertion problem is formulated as a **nonlinear root-finding problem**:
-
-**Decision variables (control vector):**
-
-$$\mathbf{u} = \begin{bmatrix} \theta_0 \\ t_{coast} \\ t_{burn2} \\ \alpha_2 \end{bmatrix}$$
-
-Where:
-- **$\theta_0$**: Initial pitch-over angle [deg]
-- **$t_{coast}$**: Coast phase duration [s]
-- **$t_{burn2}$**: Stage-2 burn time [s]
-- **$\alpha_2$**: Stage-2 steering angle [rad]
-
-**Residual function:**
-
-$$\mathbf{F}(\mathbf{u}) = \begin{bmatrix} \frac{a(\mathbf{u}) - r_{target}}{r_{target}} \\ e(\mathbf{u}) \\ \gamma(\mathbf{u}) \end{bmatrix}$$
-
-**Goal**: Find $\mathbf{u}^*$ such that $\mathbf{F}(\mathbf{u}^*) \approx \mathbf{0}$
-
-This ensures:
-1. Semi-major axis matches target radius: $a = r_{target}$
-2. Orbit is circular: $e = 0$
-3. Insertion is tangent: $\gamma = 0$
-
-**Implementation**: `apogee_physics/shooting.py::solve_circular_orbit`
-
+### Ode Integration
+[docs/content/numerical-methods/ode-integration/index.md](docs/content/numerical-methods/ode-integration/index.md)  
 ### Optimization Algorithm
+[docs/content/numerical-methods/optimization/index.md](docs/content/numerical-methods/optimization/index.md)  
+### Stability
+[docs/content/numerical-methods/stability/index.md](docs/content/numerical-methods/stability/index.md)  
 
-The solver uses a **hybrid Levenberg-Marquardt + Broyden method**:
 
-#### 1. Bound Constraints via Logistic Re-parameterization
-
-Physical bounds are enforced:
-
-$$\theta_0 \in [\theta_{min}, \theta_{max}]$$
-$$t_{coast} \in [0, 200] \text{ s}$$
-$$t_{burn2} \in [50, 450] \text{ s}$$
-$$\alpha_2 \in [\alpha_{min}, \alpha_{max}]$$
-
-Introduce unconstrained variables $\mathbf{x} \in \mathbb{R}^4$:
-
-$$u_i(x_i) = u_{i,min} + (u_{i,max} - u_{i,min}) \cdot \sigma(x_i)$$
-
-$$\sigma(x) = \frac{1}{1 + e^{-x}} \quad \text{(logistic function)}$$
-
-**Implementation**: `apogee_physics/shooting.py::_u_from_x`, `_x_from_u`
-
-#### 2. Finite-Difference Jacobian
-
-Compute Jacobian $\mathbf{J} = \frac{\partial \mathbf{F}}{\partial \mathbf{x}}$ using forward differences:
-
-$$\mathbf{J}_{:,i} \approx \frac{\mathbf{F}(\mathbf{x} + \Delta x_i \mathbf{e}_i) - \mathbf{F}(\mathbf{x})}{\Delta x_i}$$
-
-**Implementation**: `apogee_physics/shooting.py::_fd_jacobian_x`
-
-#### 3. Levenberg-Marquardt Step
-
-At iteration $k$, solve damped normal equations:
-
-$$(\mathbf{J}_k^T \mathbf{J}_k + \lambda_k \mathbf{I}) \Delta\mathbf{x}_k = -\mathbf{J}_k^T \mathbf{F}_k$$
-
-Backtracking line search: try step lengths $\alpha \in \{1, \frac{1}{2}, \frac{1}{4}, \ldots\}$ until:
-
-$$\|\mathbf{F}(\mathbf{x}_k + \alpha \cdot \Delta\mathbf{x}_k)\|_2 < \|\mathbf{F}(\mathbf{x}_k)\|_2$$
-
-**Implementation**: `apogee_physics/shooting.py::_newton`
-
-#### 4. Broyden Rank-1 Update
-
-After accepted step $\mathbf{s} = \mathbf{x}_{k+1} - \mathbf{x}_k$ and $\mathbf{y} = \mathbf{F}_{k+1} - \mathbf{F}_k$:
-
-$$\mathbf{J}_{k+1} = \mathbf{J}_k + \frac{(\mathbf{y} - \mathbf{J}_k \mathbf{s})\mathbf{s}^T}{\mathbf{s}^T \mathbf{s}}$$
-
-This reduces expensive residual evaluations while maintaining superlinear convergence.
-
-**Implementation**: `apogee_physics/shooting.py::_broyden_update`
-
-#### 5. Multistart Strategy
-
-Generate candidate initial guesses from coarse grids over each control variable, score by $\|\mathbf{F}(\mathbf{u}_0)\|_2$, and select best initializations.
-
-**Implementation**: `apogee_physics/shooting.py` (candidate generation)
-
-### ODE Integration
-
-Each flight phase is integrated using:
-
-- **Solver**: Tsitouras 5(4) explicit Runge-Kutta (`diffrax.Tsit5`)
-- **Step control**: PID controller with adaptive time-stepping
-  - Relative tolerance: `rtol = 1e-6`
-  - Absolute tolerance: `atol = 1e-6`
-- **Event detection**: Newton root-finding (`optimistix.Newton`)
-  - Root relative tolerance: `root_rtol = 1e-6`
-  - Root absolute tolerance: `root_atol = 1e-3`
-- **Saving**: Initial time + all accepted steps
-
-**Implementation**: `apogee_physics/simulate.py::_solve_segment`
-
-### Numerical Regularizations
-
-#### Guard for 1/v singularity
-
-Near liftoff ($v \to 0$), the $\dot{\gamma}$ equation contains $1/v$. Replace:
-
-$$\frac{1}{v} \quad \to \quad \frac{v}{v^2 + v_\varepsilon^2}$$
-
-Matches $1/v$ for $v \gg v_\varepsilon$, bounded at $v = 0$.
-
-**Implementation**: `apogee_physics/dynamics.py::rhs_general` (variable `inv_v`)
-
-#### Guard for 1/r collapse
-
-Prevent numerical issues if $r$ becomes non-physical:
-
-$$r_{safe} = \max(r, 0.99 \cdot R_E)$$
-
-Use $r_{safe}$ in all denominator terms.
-
-**Implementation**: `apogee_physics/dynamics.py::rhs_general` (variable `r_safe`)
-
-#### Time Monotonicity Enforcement
-
-Adaptive solvers and event boundaries can produce non-increasing time samples. Enforce strict monotonicity:
-
-$$t_{k+1} > t_k \quad \forall k$$
-
-by filtering and applying mask to all derived series.
-
-**Implementation**: `apogee_physics/simulate.py::_strictly_increasing_mask`
 
 ## Installation
 
