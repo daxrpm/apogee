@@ -204,63 +204,6 @@ From these quantities, the simulator derives the final orbital elements and inse
 Detailed theory:  
 [Orbital Mechanics Theory](docs/content/theory/orbital-mechanics.md)
 
-#### Satellite State
-
-Position in ECI for circular equatorial orbit:
-
-$$\mathbf{r}(t) = r \begin{bmatrix} \cos(\nu) \\ \sin(\nu) \\ 0 \end{bmatrix}$$
-
-Where:
-- $r = a$ (semi-major axis from launch)
-- $\nu = \nu_0 + n \cdot t$ (true anomaly)
-- $n = \sqrt{\mu/r^3}$ (mean motion)
-- $\nu_0$ (initial anomaly from launch trajectory $\lambda_{final}$)
-
-**Orbital period:**
-
-$$T = \frac{2\pi}{n} = 2\pi \sqrt{\frac{r^3}{\mu}}$$
-
-**Implementation**: `apogee_orbit/core.py::EquatorialOrbit`
-
-#### LVLH Basis Vectors
-
-For equatorial orbit at true anomaly $\nu$:
-
-$$\mathbf{x}_L = \begin{bmatrix} -\sin(\nu) \\ \cos(\nu) \\ 0 \end{bmatrix}, \quad
-\mathbf{y}_L = \begin{bmatrix} 0 \\ 0 \\ -1 \end{bmatrix}, \quad
-\mathbf{z}_L = \begin{bmatrix} -\cos(\nu) \\ -\sin(\nu) \\ 0 \end{bmatrix}$$
-
-**Implementation**: `apogee_orbit/core.py::EquatorialOrbit.get_lvlh_basis`
-
-#### Yaw Steering Algorithm
-
-The sun vector $\mathbf{s}_{ECI}$ (arbitrary unit vector) is transformed to LVLH frame:
-
-$$\mathbf{s}_{local} = \begin{bmatrix} \mathbf{s} \cdot \mathbf{x}_L \\ \mathbf{s} \cdot \mathbf{y}_L \\ \mathbf{s} \cdot \mathbf{z}_L \end{bmatrix}$$
-
-**Yaw angle** (rotation about nadir axis):
-
-$$\psi = \arctan2(s_{y,local}, s_{x,local})$$
-
-This control law rotates the spacecraft body frame such that the sun vector lies in the Body X-Z plane, allowing solar panels (rotating about Body Y) to track the sun optimally.
-
-**Beta angle** (sun elevation above orbital plane):
-
-$$\beta = \arcsin(-s_{y,local})$$
-
-For equatorial orbits with sun in the equatorial plane, $\beta \approx 0$.
-
-**Implementation**: `apogee_orbit/attitude.py::calculate_yaw_steering`
-
-#### Physical Interpretation
-
-| Condition | Yaw Angle | Meaning |
-|-----------|-----------|---------|
-| Sun ahead of velocity | $\psi = 0°$ | Satellite "faces forward" |
-| Sun behind velocity | $\psi = 180°$ | Satellite "faces backward" |
-| Sun at ±90° | $\psi = ±90°$ | Satellite rotates sideways |
-
-The yaw profile exhibits characteristic **180° flips** when the sun crosses the velocity/anti-velocity boundary (at $\nu = 0°$ and $\nu = 180°$ for sun at $+X$).
 
 
 
@@ -272,28 +215,24 @@ The circular orbit insertion problem is formulated as a **nonlinear root-finding
 
 $$\mathbf{u} = \begin{bmatrix} \theta_0 \\ t_{coast} \\ t_{burn2} \\ \alpha_2 \end{bmatrix}$$
 
-Where:
-- **$\theta_0$**: Initial pitch-over angle [deg]
-- **$t_{coast}$**: Coast phase duration [s]
-- **$t_{burn2}$**: Stage-2 burn time [s]
-- **$\alpha_2$**: Stage-2 steering angle [rad]
 
-**Residual function:**
 
-$$\mathbf{F}(\mathbf{u}) = \begin{bmatrix} \frac{a(\mathbf{u}) - r_{target}}{r_{target}} \\ e(\mathbf{u}) \\ \gamma(\mathbf{u}) \end{bmatrix}$$
+## Numerical Methods
 
-**Goal**: Find $\mathbf{u}^*$ such that $\mathbf{F}(\mathbf{u}^*) \approx \mathbf{0}$
+All documentation for numerical methods is located in the folder:  
+[`docs/content/numerical-methods`](docs/content/numerical-methods)
 
-This ensures:
-1. Semi-major axis matches target radius: $a = r_{target}$
-2. Orbit is circular: $e = 0$
-3. Insertion is tangent: $\gamma = 0$
+For a summary, check:  
+[`docs/content/numerical-methods/index.md`](docs/content/numerical-methods/index.md)
 
-**Implementation**: `apogee_physics/shooting.py::solve_circular_orbit`
+### Ode Integration
+[`docs/content/numerical-methods/ode-integration/index.md`](docs/content/numerical-methods/ode-integration/index.md)  
 
 ### Optimization Algorithm
+[`docs/content/numerical-methods/optimization/index.md`](docs/content/numerical-methods/optimization/index.md)  
 
-The solver uses a **hybrid Levenberg-Marquardt + Broyden method**:
+### Stability
+[`docs/content/numerical-methods/stability/index.md`](docs/content/numerical-methods/stability/index.md)  
 
 #### 1. Bound Constraints via Logistic Re-parameterization
 
