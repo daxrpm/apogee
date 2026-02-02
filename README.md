@@ -3,7 +3,7 @@
 **A two-stage rocket ascent simulator with shooting-method optimization for circular Low Earth Orbit (LEO) insertion.**
 
 <p align="center">
-  <img src="docs/falcon9Rocket.jpg" alt="Falcon 9 Launch" width="600"/>
+  <img src="docs/content/assets/images/falcon9Rocket.jpg" alt="Falcon 9 Launch" width="600"/>
 </p>
 
 
