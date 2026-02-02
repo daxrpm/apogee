@@ -33,8 +33,8 @@ Apogee is a comprehensive space mission simulator designed to model the complete
    - Stage separation rendering (✅ Implemented)
    - Multi-mode camera system with free OrbitControls (✅ Implemented)
    - Propulsion and separation effects (✅ Implemented)
-   - Orbital path rendering (🔄 Future)
-   - Satellite attitude animation (🔄 Future)
+   - Orbital path rendering (✅ Implemented)
+   - Satellite attitude animation (✅ Implemented)
 
 
 
