@@ -17,6 +17,13 @@ uv run mkdocs serve
 uv run mkdocs build
 ```
 
+## Build Requirements
+
+- Python ≥ 3.11
+- `uv` package manager
+- Node.js (only for frontend-related docs previews)
+
+
 ## Structure
 
 ```
