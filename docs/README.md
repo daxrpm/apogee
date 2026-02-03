@@ -42,6 +42,14 @@ docs/
 └── site/                # Built HTML (generated)
 ```
 
+## Writing Conventions
+
+- SI units are used throughout
+- Vectors and matrices are denoted in bold
+- Angles are expressed in radians unless stated otherwise
+- All equations reference their implementation files
+
+
 ## Features
 
 - **Step-by-step mathematical derivations** for all physics equations
