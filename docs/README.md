@@ -69,6 +69,16 @@ Equations are rendered using KaTeX (built into mkdocs-shadcn). Custom macros are
 uv run mkdocs gh-deploy
 ```
 
+## Common Issues
+
+**KaTeX not rendering locally**
+- Ensure `pymdown-extensions` is installed
+- Check `katex_options` in `mkdocs.yml`
+
+**Build directory committed**
+- The `site/` directory is generated and should not be manually edited
+
+
 ## Theme
 
 Using [mkdocs-shadcn](https://asiffer.github.io/mkdocs-shadcn/) - a beautiful, modern theme with:
